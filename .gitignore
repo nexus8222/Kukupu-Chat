@@ -27,6 +27,5 @@ server_test.log
 
 # IDE & Editor files
 .vscode/
-.idea/
-*.swp
-*~
+# Developer private references
+mind.md

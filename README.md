@@ -50,20 +50,28 @@ A high-performance, multithreaded terminal chat server and client written in pur
 - **Per-IP Connection Throttling**: Restricts maximum concurrent TCP connections per IP address to mitigate socket-exhaustion DoS attacks.
 - **Protocol Fast-Path**: Internal control messages (`__FILECHUNK__`, `__TYPING__`, `__E2EE__`) bypass human rate limits to prevent file stalls.
 
-### [4] Secure PBKDF2 Authentication & Offline Inbox
-- **Cryptographic Storage**: OpenSSL PBKDF2-HMAC-SHA256 (10,000 iterations, 16-byte secure random salt) stored in `admin.cred`.
-- **Dynamic Password Management**: Administrators can rotate server passwords at runtime with `/setadminpwd <newpwd>`.
+### [4] Persistent User Accounts & Secure PBKDF2 Storage
+- **Salted PBKDF2-HMAC-SHA256**: 100,000 iterations with 16-byte cryptographically secure random salt generated via OpenSSL `RAND_bytes()`.
+- **Strict Username Policy**: 2-10 characters, strictly alphanumeric and underscore (`_`).
+- **Account Isolation**: Guest users cannot claim or impersonate registered usernames. Concurrent logins of active registered users are blocked.
+- **Dedicated Credential Vault**: Stored in `accounts.dat` with `chmod 0600` access controls and thread-safe file locking.
 - **Persistent Offline Store**: Private messages to offline users are queued in `offline_inbox.dat` and replayed immediately upon reconnection with original timestamps.
 
-### [5] Multi-Room Party System
+### [5] Interactive TUI Landing Screen & Modals
+- **Interactive Menu**: Launch screen featuring keyboard navigation (`Up/Down/Tab`, `1-4`, `Enter`, `Esc`).
+- **Guest vs. Member**: Quick Guest Login for anonymous instant access or Member Login with masked password dialogs (`*`).
+- **In-App Account Registration**: Modal dialog for account creation with validation and confirmation checks.
+- **Non-Interactive Fallback**: Uses `isatty()` to support automated testing and scripted socket piping seamlessly.
+
+### [6] Multi-Room Party System
 - **Isolated Channels**: Create, join, or leave isolated chat rooms (`/createparty`, `/joinparty`, `/leaveparty`).
 - **Room Access Control**: Lock rooms with `/lockparty` or invite specific users with `/inviteparty`.
 
-### [6] Vanishing Messages & Mini-Games
+### [7] Vanishing Messages & Mini-Games
 - **Self-Destructing Messages**: Send messages that automatically vanish after a specified TTL (`/vanish <sec> <msg>`).
 - **Interactive Mini-Games**: Multiplayer number-guessing game with turn cycling and scoreboards (`/game`).
 
-### [7] Professional Full-Screen Terminal UI (TUI)
+### [8] Professional Full-Screen Terminal UI (TUI)
 - **Alternate Screen Buffer**: Uses `\033[?1049h` and `\033[?1049l` to preserve standard shell scrollback.
 - **Flicker-Free Double Buffering**: Pre-renders entire screen frame into an off-screen buffer before a single atomic flush.
 - **Split-Pane Architecture**: Top header bar, main chat viewport, collapsible members sidebar, dedicated status bar, and pinned input box.
@@ -136,7 +144,6 @@ kukupu-chat/
 ├── Dockerfile              # Containerized build & isolated runtime definition
 ├── docker-compose.yml      # Orchestration definition for single-command deploy
 ├── README.md               # Comprehensive architectural documentation & guides
-├── mind.md                 # Detailed security audit & cryptographic specification
 ├── checklist               # Development tracking roadmap
 │
 ├── include/                # Header definitions & public APIs
@@ -153,6 +160,7 @@ kukupu-chat/
 │   ├── game.h              # Number guessing mini-game engine
 │   ├── lastseen.h          # Binary serialized logout tracker definitions
 │   ├── log.h               # Server event and audit logging APIs
+│   ├── login_ui.h          # TUI Landing Page & authentication modal definitions
 │   ├── motd.h              # Message of the Day definitions
 │   ├── mute.h              # User muting logic and mutelist definitions
 │   ├── party.h             # Multi-room channel management declarations
@@ -169,6 +177,7 @@ kukupu-chat/
 │   ├── client/             # Client application & terminal interface
 │   │   ├── client.c        # Event loop, socket multiplexing & tab completion
 │   │   ├── ui.c            # Full-screen TUI rendering engine
+│   │   ├── login_ui.c      # Interactive TUI landing page, guest & login dialogs
 │   │   ├── e2ee.c          # Double Ratchet state machine & key management
 │   │   └── file_transfer.c # Base64 chunk streaming & verification engine
 │   └── server/             # Server daemon & moderation subsystems
@@ -190,12 +199,13 @@ kukupu-chat/
 │
 └── tests/                  # Automated verification test suites
     ├── test_e2e_full.c     # Socket-level integration suite (E2EE, files, inbox, auth)
-    └── test_all_commands.py# Full coverage test suite for all /help commands
+    ├── test_all_commands.py# Full coverage test suite for all /help commands
+    └── test_auth_and_features.py # Automated suite for PBKDF2 accounts & /clear
 ```
 
 ---
 
-## 🔧 Prerequisites & Dependencies
+## Prerequisites & Dependencies
 
 - **Operating System**: Linux (Ubuntu 20.04+, Debian, Arch, Fedora) or POSIX-compliant environment.
 - **Compiler**: GCC 9.0+ or Clang 10.0+ with C11 support.
@@ -211,7 +221,7 @@ sudo apt-get install -y build-essential libssl-dev
 
 ---
 
-## 🚀 Build & Quick Start
+## Build & Quick Start
 
 ### 1. Compile Everything
 ```bash
@@ -230,14 +240,13 @@ make clean && make
 Open a new terminal window for each client:
 
 ```bash
-# Connect as a standard user
+# Launch interactive client
 ./client 127.0.0.1
-Enter your username: alice
-
-# Connect as another user
-./client 127.0.0.1
-Enter your username: bob
 ```
+The interactive TUI landing page launches immediately:
+- Select **`[1] >> Quick Guest Login`** to join public chat instantly as a guest handle.
+- Select **`[2] [#] Login to Registered Account`** to enter your username & password.
+- Select **`[3] [+] Register New Account`** to create a persistent account with salted PBKDF2.
 
 ### 4. Connect as Administrator
 ```bash
@@ -249,7 +258,7 @@ Enter Joining Alias: root_admin
 
 ---
 
-## 🐳 Docker Deployment
+## Docker Deployment
 
 Run the chat server effortlessly using Docker:
 
@@ -266,7 +275,7 @@ docker compose down
 
 ---
 
-## 📖 Command Reference
+## Command Reference
 
 ### User & Communication Commands
 | Command | Syntax | Description |
@@ -368,7 +377,10 @@ make test
 # 2. Run the /help command coverage suite (tests all 44 commands over live sockets):
 make test-commands
 
-# 3. Run all test suites:
+# 3. Run the persistent accounts, PBKDF2 hashing & guest isolation test suite:
+make test-auth
+
+# 4. Run all test suites together:
 make test-all
 ```
 
@@ -378,6 +390,7 @@ make test-all
 3. **Anti-Spam Token Bucket**: Burst traffic detection, exhaustion warnings, and automated 15-second mute enforcement.
 4. **Offline Inbox**: Message queueing when recipient is disconnected, and automatic delivery replay upon reconnect.
 5. **PBKDF2 Authentication**: Challenge-response handshake, dynamic password update (`/setadminpwd`), old password rejection, and new hash verification.
+6. **Persistent User Accounts**: Unique alphanumeric handles, PBKDF2 salted hash creation, guest impersonation defense, and `/clear` terminal reset.
 
 ```text
 ============================================================
