@@ -16,6 +16,7 @@
 #include "file_transfer.h"
 #include "crypto_utils.h"
 #include "ui.h"
+#include "login_ui.h"
 
 #define INPUT_BUFFER 1024
 #define LENGTH 4096
@@ -297,6 +298,35 @@ static void handle_received_line(char *line)
         return;
     }
 
+    if (strncmp(line, "__STATUS_REG__:", 15) == 0)
+    {
+        int reg = 0;
+        if (sscanf(line, "__STATUS_REG__:%d", &reg) == 1)
+        {
+            ui_set_registered(reg);
+        }
+        return;
+    }
+
+    if (strstr(line, "\033[2J") != NULL)
+    {
+        ui_clear_messages();
+        return;
+    }
+
+    // Extract sender color from original line before strip_ansi
+    char sender_color[32] = {0};
+    if (line[0] == '\033' && line[1] == '[')
+    {
+        char *end_m = strchr(line, 'm');
+        if (end_m && (end_m - line) < 20)
+        {
+            size_t clen = (end_m - line) + 1;
+            strncpy(sender_color, line, clen);
+            sender_color[clen] = '\0';
+        }
+    }
+
     // Standard message: Strip ANSI color codes to parse logically
     char clean[2048];
     strip_ansi(line, clean, sizeof(clean));
@@ -311,7 +341,7 @@ static void handle_received_line(char *line)
         if (strcmp(sender, username) == 0)
             ui_add_message(MSG_SELF, sender, body, 0);
         else
-            ui_add_message(MSG_NORMAL, sender, body, 0);
+            ui_add_message_with_color(MSG_NORMAL, sender, body, 0, sender_color);
         return;
     }
 
@@ -664,7 +694,32 @@ static void chat_loop(void)
                     input[0] = '\0';
                     current_suggestion[0] = '\0';
                     ui_render(input, cursor_pos, current_suggestion);
+                    send(sockfd, "/clear\n", 7, 0);
                     continue;
+                }
+
+                if (strncmp(input, "/setcolor", 9) == 0)
+                {
+                    char col[32] = {0};
+                    if (sscanf(input + 9, "%31s", col) == 1)
+                    {
+                        const char *code = NULL;
+                        if (strcasecmp(col, "red") == 0) code = "\033[1;31m";
+                        else if (strcasecmp(col, "green") == 0) code = "\033[1;32m";
+                        else if (strcasecmp(col, "yellow") == 0) code = "\033[1;33m";
+                        else if (strcasecmp(col, "blue") == 0) code = "\033[1;34m";
+                        else if (strcasecmp(col, "magenta") == 0) code = "\033[1;35m";
+                        else if (strcasecmp(col, "cyan") == 0) code = "\033[1;36m";
+                        else if (strcasecmp(col, "white") == 0) code = "\033[1;37m";
+
+                        if (code)
+                        {
+                            ui_set_user_color(code);
+                            char col_msg[128];
+                            snprintf(col_msg, sizeof(col_msg), "Color scheme set to %s%s\033[0m", code, col);
+                            ui_add_message(MSG_SYSTEM, "Color", col_msg, 0);
+                        }
+                    }
                 }
 
                 if (strncmp(input, "/e2ee ", 6) == 0)
@@ -914,23 +969,6 @@ int main(int argc, char **argv)
     signal(SIGINT, catch_ctrl_c_and_exit);
     signal(SIGPIPE, SIG_IGN);
 
-    printf("============================================================\n");
-    printf("   KUKUPU CHAT - CLIENT INITIALIZATION\n");
-    printf("============================================================\n");
-    printf("Enter your username: ");
-    fflush(stdout);
-    if (fgets(username, sizeof(username), stdin) == NULL)
-    {
-        return EXIT_FAILURE;
-    }
-    str_trim_lf(username, sizeof(username));
-
-    if (strlen(username) < 2 || strlen(username) >= 32)
-    {
-        printf("Username must be between 2 and 31 characters.\n");
-        return EXIT_FAILURE;
-    }
-
     struct sockaddr_in server_addr;
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -950,10 +988,44 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    send(sockfd, username, strlen(username), 0);
+    int is_registered_user = 0;
 
-    // Administrative Challenge-Response Authentication
-    if (strcmp(username, "admin") == 0)
+    // Interactive Terminal: Launch Full TUI Landing and Authentication Screen
+    if (isatty(STDIN_FILENO))
+    {
+        if (run_login_tui(sockfd, username, sizeof(username), &is_registered_user) != 0)
+        {
+            close(sockfd);
+            return EXIT_SUCCESS;
+        }
+        ui_set_registered(is_registered_user);
+    }
+    else
+    {
+        // Non-interactive fallback for automated testing suites and scripts
+        printf("============================================================\n");
+        printf("   KUKUPU CHAT - CLIENT INITIALIZATION\n");
+        printf("============================================================\n");
+        printf("Enter your username: ");
+        fflush(stdout);
+        if (fgets(username, sizeof(username), stdin) == NULL)
+        {
+            close(sockfd);
+            return EXIT_FAILURE;
+        }
+        str_trim_lf(username, sizeof(username));
+
+        if (strlen(username) < 2 || strlen(username) >= 32)
+        {
+            printf("Username must be between 2 and 31 characters.\n");
+            close(sockfd);
+            return EXIT_FAILURE;
+        }
+
+        send(sockfd, username, strlen(username), 0);
+
+        // Administrative Challenge-Response Authentication
+        if (strcmp(username, "admin") == 0)
     {
         for (int i = 0; i < MAX_TRIES; i++)
         {
@@ -1024,6 +1096,7 @@ int main(int argc, char **argv)
         }
         sleep(1);
     }
+}
 
     // Initialize cryptographic Double Ratchet and file transfer engines
     e2ee_init();

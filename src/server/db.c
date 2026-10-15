@@ -240,3 +240,148 @@ int db_get_user_key(const char *username, char *out_pubkey_hex, size_t max_len) 
     return found;
 }
 
+// Internal helper: checks if username is already registered (assumes db_lock held)
+static int db_user_exists_locked(const char *username) {
+    if (!username || strlen(username) == 0) return 0;
+    FILE *f = fopen(DB_ACCOUNTS_FILE, "r");
+    if (!f) return 0;
+
+    char line[256];
+    int found = 0;
+    while (fgets(line, sizeof(line), f)) {
+        char u[64] = {0};
+        if (sscanf(line, "%63[^:]", u) == 1) {
+            if (strcasecmp(u, username) == 0) {
+                found = 1;
+                break;
+            }
+        }
+    }
+    fclose(f);
+    return found;
+}
+
+int db_user_exists(const char *username) {
+    if (!username) return 0;
+    pthread_mutex_lock(&db_lock);
+    int exists = db_user_exists_locked(username);
+    pthread_mutex_unlock(&db_lock);
+    return exists;
+}
+
+int db_register_user(const char *username, const char *password, char *err_msg, size_t err_len) {
+    if (!username || !password) {
+        if (err_msg && err_len > 0) snprintf(err_msg, err_len, "Missing username or password");
+        return 0;
+    }
+
+    size_t ulen = strlen(username);
+    if (ulen < 2 || ulen > 10) {
+        if (err_msg && err_len > 0) snprintf(err_msg, err_len, "Username must be between 2 and 10 characters");
+        return 0;
+    }
+
+    // Only alphanumeric and underscore
+    for (size_t i = 0; i < ulen; ++i) {
+        char c = username[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) {
+            if (err_msg && err_len > 0) snprintf(err_msg, err_len, "Username can only contain letters, numbers, and '_'");
+            return 0;
+        }
+    }
+
+    // Block reserved names
+    if (strcasecmp(username, "admin") == 0 ||
+        strcasecmp(username, "server") == 0 ||
+        strcasecmp(username, "system") == 0 ||
+        strcasecmp(username, "all") == 0 ||
+        strcasecmp(username, "root") == 0 ||
+        strcasecmp(username, "public") == 0) {
+        if (err_msg && err_len > 0) snprintf(err_msg, err_len, "Username '%s' is a reserved system name", username);
+        return 0;
+    }
+
+    size_t plen = strlen(password);
+    if (plen < 6 || plen > 64) {
+        if (err_msg && err_len > 0) snprintf(err_msg, err_len, "Password must be between 6 and 64 characters");
+        return 0;
+    }
+
+    pthread_mutex_lock(&db_lock);
+
+    if (db_user_exists_locked(username)) {
+        pthread_mutex_unlock(&db_lock);
+        if (err_msg && err_len > 0) snprintf(err_msg, err_len, "Username '%s' is already registered", username);
+        return 0;
+    }
+
+    unsigned char salt[SALT_LEN];
+    if (RAND_bytes(salt, sizeof(salt)) != 1) {
+        pthread_mutex_unlock(&db_lock);
+        if (err_msg && err_len > 0) snprintf(err_msg, err_len, "Cryptographic random generation failed");
+        return 0;
+    }
+
+    unsigned char hash[32];
+    if (hash_password_pbkdf2(password, salt, sizeof(salt), hash) != 0) {
+        pthread_mutex_unlock(&db_lock);
+        if (err_msg && err_len > 0) snprintf(err_msg, err_len, "Password hashing failed");
+        return 0;
+    }
+
+    char salt_hex[SALT_LEN * 2 + 1];
+    char hash_hex[32 * 2 + 1];
+    hex_encode(salt, sizeof(salt), salt_hex, sizeof(salt_hex));
+    hex_encode(hash, sizeof(hash), hash_hex, sizeof(hash_hex));
+
+    FILE *f = fopen(DB_ACCOUNTS_FILE, "a");
+    if (!f) {
+        pthread_mutex_unlock(&db_lock);
+        if (err_msg && err_len > 0) snprintf(err_msg, err_len, "Could not open user accounts store");
+        return 0;
+    }
+
+    time_t now = time(NULL);
+    fprintf(f, "%s:%s:%s:%ld\n", username, salt_hex, hash_hex, (long)now);
+    fclose(f);
+    chmod(DB_ACCOUNTS_FILE, 0600);
+
+    pthread_mutex_unlock(&db_lock);
+    return 1;
+}
+
+int db_verify_user(const char *username, const char *password) {
+    if (!username || !password) return 0;
+
+    pthread_mutex_lock(&db_lock);
+    FILE *f = fopen(DB_ACCOUNTS_FILE, "r");
+    if (!f) {
+        pthread_mutex_unlock(&db_lock);
+        return 0;
+    }
+
+    char line[256];
+    int verified = 0;
+    while (fgets(line, sizeof(line), f)) {
+        char u[64] = {0}, s_hex[64] = {0}, h_hex[128] = {0};
+        long t = 0;
+        if (sscanf(line, "%63[^:]:%63[^:]:%127[^:]:%ld", u, s_hex, h_hex, &t) >= 3) {
+            if (strcasecmp(u, username) == 0) {
+                unsigned char salt[SALT_LEN];
+                unsigned char expected_hash[32];
+                if (hex_decode(s_hex, salt, sizeof(salt)) == (int)sizeof(salt) &&
+                    hex_decode(h_hex, expected_hash, sizeof(expected_hash)) == (int)sizeof(expected_hash)) {
+                    if (verify_password_pbkdf2(password, salt, sizeof(salt), expected_hash)) {
+                        verified = 1;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    fclose(f);
+    pthread_mutex_unlock(&db_lock);
+    return verified;
+}
+

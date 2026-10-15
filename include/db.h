@@ -28,4 +28,10 @@ int db_fetch_and_clear_offline_msgs(const char *recipient, offline_msg_t *out_ms
 int db_save_user_key(const char *username, const char *pubkey_hex);
 int db_get_user_key(const char *username, char *out_pubkey_hex, size_t max_len);
 
+// Registered User Accounts Datastore (PBKDF2-HMAC-SHA256)
+#define DB_ACCOUNTS_FILE "accounts.dat"
+int db_register_user(const char *username, const char *password, char *err_msg, size_t err_len);
+int db_verify_user(const char *username, const char *password);
+int db_user_exists(const char *username);
+
 #endif // DB_H

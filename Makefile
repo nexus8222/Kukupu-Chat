@@ -32,6 +32,7 @@ SRCS_SERVER = $(SRC_DIR)/server/server.c \
 # Client Sources
 SRCS_CLIENT = $(SRC_DIR)/client/client.c \
               $(SRC_DIR)/client/ui.c \
+              $(SRC_DIR)/client/login_ui.c \
               $(SRC_DIR)/client/e2ee.c \
               $(SRC_DIR)/client/file_transfer.c \
               $(SRCS_COMMON)
@@ -70,7 +71,10 @@ test: $(TARGET_SERVER) $(TARGET_CLIENT) $(TARGET_TEST)
 test-commands: $(TARGET_SERVER)
 	python3 tests/test_all_commands.py
 
-test-all: test test-commands
+test-auth: $(TARGET_SERVER)
+	python3 tests/test_auth_and_features.py
+
+test-all: test test-commands test-auth
 
 $(TARGET_TEST): $(TESTS_DIR)/test_e2e_full.c $(BUILD_DIR)/common/crypto_utils.o $(BUILD_DIR)/client/e2ee.o $(BUILD_DIR)/client/file_transfer.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)

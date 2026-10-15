@@ -22,6 +22,9 @@ void ui_resize(void);
 
 // Chat messages
 void ui_add_message(ui_msg_type_t type, const char *sender, const char *text, int msg_id);
+void ui_add_message_with_color(ui_msg_type_t type, const char *sender, const char *text, int msg_id, const char *color);
+void ui_set_user_color(const char *color_code);
+void ui_set_registered(int is_registered);
 void ui_edit_message(int msg_id, const char *new_text);
 void ui_delete_message(int msg_id);
 void ui_clear_messages(void);

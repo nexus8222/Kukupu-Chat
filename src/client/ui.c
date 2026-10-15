@@ -16,6 +16,7 @@
 typedef struct {
     ui_msg_type_t type;
     char sender[32];
+    char sender_color[32];
     char text[1024];
     time_t timestamp;
     int msg_id;
@@ -35,6 +36,8 @@ static int msg_count = 0;
 static int scroll_offset = 0;
 
 static char my_username[32] = "user";
+static char my_user_color[32] = "\033[1;32m"; // Default green
+static int my_is_registered = 0;
 static char current_room[16] = "0000";
 static int e2ee_active = 1;
 
@@ -134,7 +137,7 @@ void ui_resize(void)
     pthread_mutex_unlock(&ui_lock);
 }
 
-void ui_add_message(ui_msg_type_t type, const char *sender, const char *text, int msg_id)
+void ui_add_message_with_color(ui_msg_type_t type, const char *sender, const char *text, int msg_id, const char *color)
 {
     if (!text || strlen(text) == 0) return;
 
@@ -145,6 +148,16 @@ void ui_add_message(ui_msg_type_t type, const char *sender, const char *text, in
     messages[idx].timestamp = time(NULL);
     messages[idx].msg_id = msg_id;
     messages[idx].vanished = 0;
+
+    if (color && strlen(color) > 0)
+    {
+        strncpy(messages[idx].sender_color, color, sizeof(messages[idx].sender_color) - 1);
+        messages[idx].sender_color[sizeof(messages[idx].sender_color) - 1] = '\0';
+    }
+    else
+    {
+        messages[idx].sender_color[0] = '\0';
+    }
 
     if (sender)
     {
@@ -167,6 +180,27 @@ void ui_add_message(ui_msg_type_t type, const char *sender, const char *text, in
         scroll_offset++;
     }
 
+    pthread_mutex_unlock(&ui_lock);
+}
+
+void ui_add_message(ui_msg_type_t type, const char *sender, const char *text, int msg_id)
+{
+    ui_add_message_with_color(type, sender, text, msg_id, NULL);
+}
+
+void ui_set_user_color(const char *color_code)
+{
+    if (!color_code) return;
+    pthread_mutex_lock(&ui_lock);
+    strncpy(my_user_color, color_code, sizeof(my_user_color) - 1);
+    my_user_color[sizeof(my_user_color) - 1] = '\0';
+    pthread_mutex_unlock(&ui_lock);
+}
+
+void ui_set_registered(int is_registered)
+{
+    pthread_mutex_lock(&ui_lock);
+    my_is_registered = is_registered;
     pthread_mutex_unlock(&ui_lock);
 }
 
@@ -209,7 +243,10 @@ void ui_clear_messages(void)
     pthread_mutex_lock(&ui_lock);
     msg_count = 0;
     scroll_offset = 0;
+    memset(messages, 0, sizeof(messages));
     pthread_mutex_unlock(&ui_lock);
+    printf("\033[2J\033[H\033[3J");
+    fflush(stdout);
 }
 
 void ui_set_room(const char *room)
@@ -385,12 +422,15 @@ static int wrap_message(const ui_message_t *msg, int max_width, render_line_t *o
     {
         case MSG_SELF:
             snprintf(prefix_plain, sizeof(prefix_plain), "[%s] [YOU] > ", tstr);
-            snprintf(prefix_color, sizeof(prefix_color), "\033[2m[%s]\033[0m \033[1;32m[YOU]\033[0m \033[1;37m>\033[0m ", tstr);
+            snprintf(prefix_color, sizeof(prefix_color), "\033[2m[%s]\033[0m %s[YOU]\033[0m \033[1;37m>\033[0m ", tstr, my_user_color);
             break;
         case MSG_NORMAL:
+        {
+            const char *scolor = (msg->sender_color[0] != '\0') ? msg->sender_color : "\033[1;36m";
             snprintf(prefix_plain, sizeof(prefix_plain), "[%s] <%s> ", tstr, msg->sender);
-            snprintf(prefix_color, sizeof(prefix_color), "\033[2m[%s]\033[0m \033[1;36m<%s>\033[0m ", tstr, msg->sender);
+            snprintf(prefix_color, sizeof(prefix_color), "\033[2m[%s]\033[0m %s<%s>\033[0m ", tstr, scolor, msg->sender);
             break;
+        }
         case MSG_E2EE:
             snprintf(prefix_plain, sizeof(prefix_plain), "[%s] [E2EE:%s] > ", tstr, msg->sender);
             snprintf(prefix_color, sizeof(prefix_color), "\033[2m[%s]\033[0m \033[1;35m[E2EE:%s]\033[0m \033[1;37m>\033[0m ", tstr, msg->sender);
@@ -540,7 +580,10 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
     snprintf(head_mid, sizeof(head_mid), "── Room: #%s ── [E2EE: %s] ",
              current_room, e2ee_active ? "ACTIVE" : "OFF");
     char head_right[64];
-    snprintf(head_right, sizeof(head_right), "── User: @%s ──┐", my_username);
+    if (my_is_registered)
+        snprintf(head_right, sizeof(head_right), "── User: @%s [REG] ──┐", my_username);
+    else
+        snprintf(head_right, sizeof(head_right), "── User: %s [GUEST] ──┐", my_username);
 
     int visual_header_len = (int)(strlen(head_left) + strlen(head_mid) + strlen(head_right));
     int head_dash = cols - visual_header_len;
@@ -560,7 +603,7 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
         fidx += snprintf(frame + fidx, FRAME_BUF_SIZE - fidx, "\033[38;5;240m─\033[0m");
     }
     fidx += snprintf(frame + fidx, FRAME_BUF_SIZE - fidx,
-                     "\033[1;35m── User: @%s\033[0m\033[1;36m ──┐\033[0m\n", my_username);
+                     "%s\033[1;35m%s\033[0m\n", my_is_registered ? "\033[1;32m" : "\033[1;36m", head_right);
 
     // -------------------------------------------------------------
     // ROWS 2 .. (rows - 4): CHAT VIEWPORT + SIDEBAR

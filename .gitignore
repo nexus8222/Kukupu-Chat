@@ -11,6 +11,7 @@ build/
 
 # Runtime generated databases and persistence files
 admin.cred
+accounts.dat
 user_keys.dat
 offline_inbox.dat
 .lastseen

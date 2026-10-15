@@ -118,6 +118,13 @@ int handle_command(const char *cmdline, client_t *cli)
 
         return 1;
     }
+
+    if (strcmp(command, "clear") == 0)
+    {
+        send_to_client(cli, "\033[2J\033[H\033[3J\n");
+        return 1;
+    }
+
     if (strcmp(command, "guessgame") == 0)
     {
         if (strcmp(arg1, "start") == 0)
@@ -343,8 +350,10 @@ int handle_command(const char *cmdline, client_t *cli)
 
     if (strcmp(command, "whoami") == 0)
     {
-        send_to_client(cli, "You are \033[1;32m%s\033[0m%s\n",
-                       cli->username, cli->is_admin ? " (admin)" : "");
+        send_to_client(cli, "You are \033[1;32m%s\033[0m%s%s\n",
+                       cli->username,
+                       cli->is_admin ? " (admin)" : "",
+                       cli->is_registered ? " [Registered Member]" : " [Guest]");
         return 1;
     }
 
@@ -750,8 +759,9 @@ int handle_command(const char *cmdline, client_t *cli)
 
                 char buffer[512];
                 snprintf(buffer, sizeof(buffer),
-                         "\033[1;36m[WHOIS] User: %s\nIP: %s\nParty: %s\nAdmin: %s\nMuted: %s\nOnline: %.0f sec\033[0m",
+                         "\033[1;36m[WHOIS] User: %s\nAccount: %s\nIP: %s\nParty: %s\nAdmin: %s\nMuted: %s\nOnline: %.0f sec\033[0m",
                          clients[i]->username,
+                         clients[i]->is_registered ? "Registered Member" : "Guest User",
                          clients[i]->ip,
                          clients[i]->party_code,
                          clients[i]->is_admin ? "Yes" : "No",

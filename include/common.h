@@ -24,6 +24,7 @@ typedef struct client {
     int active; 
     char ip[INET_ADDRSTRLEN];   // use system-defined 16
     int is_admin;
+    int is_registered;
     int is_muted;
     char color[ANSI_COLOR_MAX];
     char party_code[PARTY_CODE_LEN];

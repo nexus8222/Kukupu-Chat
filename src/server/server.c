@@ -379,35 +379,292 @@ void *handle_client(void *arg)
     char name[32];
     client_t *cli = (client_t *)arg;
 
-    int rlen = recv(cli->sockfd, name, sizeof(name) - 1, 0);
-    if (rlen <= 0)
+    int authenticated = 0;
+    while (!authenticated)
     {
-        ratelimit_release_ip_connection(cli->ip);
-        close(cli->sockfd);
-        free(cli);
-        pthread_detach(pthread_self());
-        return NULL;
-    }
-    name[rlen] = '\0';
-    trim_newline(name);
+        char auth_buf[512] = {0};
+        int rlen = recv(cli->sockfd, auth_buf, sizeof(auth_buf) - 1, 0);
+        if (rlen <= 0)
+        {
+            ratelimit_release_ip_connection(cli->ip);
+            close(cli->sockfd);
+            free(cli);
+            pthread_detach(pthread_self());
+            return NULL;
+        }
+        auth_buf[rlen] = '\0';
+        trim_newline(auth_buf);
+        if (strlen(auth_buf) == 0) continue;
 
-    if (strlen(name) == 0 || (strcmp(name, "admin") != 0 && !is_valid_username(name)))
-    {
-        send_to_client(cli, "\033[1;31m[SERVER] Invalid username. Allowed: 2-28 chars (alphanumeric, _, -).\033[0m\n");
-        ratelimit_release_ip_connection(cli->ip);
-        close(cli->sockfd);
-        free(cli);
-        pthread_detach(pthread_self());
-        return NULL;
-    }
+        // Protocol 1: Registration
+        if (strncmp(auth_buf, "__REGISTER__:", 13) == 0)
+        {
+            char reg_user[64] = {0};
+            char reg_pwd[128] = {0};
+            if (sscanf(auth_buf + 13, "%63[^:]:%127s", reg_user, reg_pwd) == 2)
+            {
+                char reg_err[128] = {0};
+                if (db_register_user(reg_user, reg_pwd, reg_err, sizeof(reg_err)))
+                {
+                    send(cli->sockfd, "__REG_OK__:Account registered successfully!\n", 44, 0);
+                }
+                else
+                {
+                    char resp[256];
+                    snprintf(resp, sizeof(resp), "__REG_ERR__:%s\n", reg_err);
+                    send(cli->sockfd, resp, strlen(resp), 0);
+                }
+            }
+            else
+            {
+                send(cli->sockfd, "__REG_ERR__:Invalid registration syntax\n", 40, 0);
+            }
+            continue;
+        }
 
-    strncpy(cli->username, name, sizeof(cli->username) - 1);
-    cli->username[sizeof(cli->username) - 1] = '\0';
+        // Protocol 2: Registered User Login
+        if (strncmp(auth_buf, "__LOGIN__:", 10) == 0)
+        {
+            char log_user[64] = {0};
+            char log_pwd[128] = {0};
+            if (sscanf(auth_buf + 10, "%63[^:]:%127s", log_user, log_pwd) == 2)
+            {
+                if (!db_user_exists(log_user) || !db_verify_user(log_user, log_pwd))
+                {
+                    send(cli->sockfd, "__LOGIN_ERR__:Invalid username or password.\n", 44, 0);
+                    continue;
+                }
 
-    pthread_mutex_lock(&clients_mutex);
-    for (int i = 0; i < MAX_CLIENTS; ++i)
-    {
-        if (clients[i] && strcmp(clients[i]->username, cli->username) == 0)
+                pthread_mutex_lock(&clients_mutex);
+                int online = 0;
+                for (int i = 0; i < MAX_CLIENTS; ++i)
+                {
+                    if (clients[i] && clients[i]->active && strcasecmp(clients[i]->username, log_user) == 0)
+                    {
+                        online = 1;
+                        break;
+                    }
+                }
+                if (online)
+                {
+                    pthread_mutex_unlock(&clients_mutex);
+                    send(cli->sockfd, "__LOGIN_ERR__:Account is already logged in online.\n", 51, 0);
+                    continue;
+                }
+                pthread_mutex_unlock(&clients_mutex);
+
+                strncpy(cli->username, log_user, sizeof(cli->username) - 1);
+                cli->username[sizeof(cli->username) - 1] = '\0';
+                cli->is_registered = 1;
+                authenticated = 1;
+                send(cli->sockfd, "__LOGIN_OK__\n", 13, 0);
+                break;
+            }
+            else
+            {
+                send(cli->sockfd, "__LOGIN_ERR__:Invalid login syntax.\n", 36, 0);
+                continue;
+            }
+        }
+
+        // Protocol 3: Guest / Anonymous Login
+        if (strncmp(auth_buf, "__GUEST__:", 10) == 0)
+        {
+            char guest_user[64] = {0};
+            snprintf(guest_user, sizeof(guest_user), "%.63s", auth_buf + 10);
+            trim_newline(guest_user);
+
+            if (!is_valid_username(guest_user))
+            {
+                send(cli->sockfd, "__GUEST_ERR__:Invalid username format.\n", 39, 0);
+                continue;
+            }
+
+            if (db_user_exists(guest_user))
+            {
+                send(cli->sockfd, "__GUEST_ERR__:Username is registered. Please log in with password.\n", 67, 0);
+                continue;
+            }
+
+            pthread_mutex_lock(&clients_mutex);
+            int online = 0;
+            for (int i = 0; i < MAX_CLIENTS; ++i)
+            {
+                if (clients[i] && clients[i]->active && strcasecmp(clients[i]->username, guest_user) == 0)
+                {
+                    online = 1;
+                    break;
+                }
+            }
+            if (online)
+            {
+                pthread_mutex_unlock(&clients_mutex);
+                send(cli->sockfd, "__GUEST_ERR__:Username already taken online.\n", 45, 0);
+                continue;
+            }
+            pthread_mutex_unlock(&clients_mutex);
+
+            strncpy(cli->username, guest_user, sizeof(cli->username) - 1);
+            cli->username[sizeof(cli->username) - 1] = '\0';
+            cli->is_registered = 0;
+            authenticated = 1;
+            send(cli->sockfd, "__GUEST_OK__\n", 13, 0);
+            break;
+        }
+
+        // Legacy / Direct Join (Automated tests & Admin challenge)
+        strncpy(name, auth_buf, sizeof(name) - 1);
+        name[sizeof(name) - 1] = '\0';
+
+        if (strlen(name) == 0 || (strcmp(name, "admin") != 0 && !is_valid_username(name)))
+        {
+            send_to_client(cli, "\033[1;31m[SERVER] Invalid username. Allowed: 2-28 chars (alphanumeric, _, -).\033[0m\n");
+            ratelimit_release_ip_connection(cli->ip);
+            close(cli->sockfd);
+            free(cli);
+            pthread_detach(pthread_self());
+            return NULL;
+        }
+
+        // Check if username is a registered account
+        if (strcmp(name, "admin") != 0 && db_user_exists(name))
+        {
+            char pwd[64];
+            int auth_success = 0;
+            for (int i = 0; i < MAX_TRIES; i++)
+            {
+                send(cli->sockfd, "ask\n", 4, 0);
+                int plen = recv(cli->sockfd, pwd, sizeof(pwd) - 1, 0);
+                if (plen <= 0) break;
+                pwd[plen] = '\0';
+                trim_newline(pwd);
+
+                if (!db_verify_user(name, pwd))
+                {
+                    if (i == MAX_TRIES - 1)
+                    {
+                        send_to_client(cli, "password wrong disconnecting...\n");
+                        break;
+                    }
+                    else
+                    {
+                        send(cli->sockfd, "try\n", 4, 0);
+                    }
+                }
+                else
+                {
+                    cli->is_registered = 1;
+                    auth_success = 1;
+                    strncpy(cli->username, name, sizeof(cli->username) - 1);
+                    cli->username[sizeof(cli->username) - 1] = '\0';
+                    send(cli->sockfd, "true\n", 5, 0);
+                    authenticated = 1;
+                    break;
+                }
+            }
+
+            if (!auth_success)
+            {
+                ratelimit_release_ip_connection(cli->ip);
+                close(cli->sockfd);
+                free(cli);
+                pthread_detach(pthread_self());
+                return NULL;
+            }
+            break;
+        }
+
+        // Legacy Admin Challenge
+        if (strcmp(name, "admin") == 0)
+        {
+            char pwd[64];
+            int auth_success = 0;
+            for (int i = 0; i < MAX_TRIES; i++)
+            {
+                send(cli->sockfd, "ask\n", 4, 0);
+                int plen = recv(cli->sockfd, pwd, sizeof(pwd) - 1, 0);
+                if (plen <= 0) break;
+                pwd[plen] = '\0';
+                trim_newline(pwd);
+
+                if (!db_verify_admin_password(pwd))
+                {
+                    if (i == MAX_TRIES - 1)
+                    {
+                        send_to_client(cli, "password wrong disconnecting...\n");
+                        break;
+                    }
+                    else
+                    {
+                        send(cli->sockfd, "try\n", 4, 0);
+                    }
+                }
+                else
+                {
+                    cli->is_admin = 1;
+                    cli->is_registered = 1;
+                    auth_success = 1;
+                    send(cli->sockfd, "true\n", 5, 0);
+
+                    char uname[32];
+                    int ulen = recv(cli->sockfd, uname, sizeof(uname) - 1, 0);
+                    if (ulen > 0)
+                    {
+                        uname[ulen] = '\0';
+                        char *nl = strchr(uname, '\n');
+                        if (nl) *nl = '\0';
+                        nl = strchr(uname, '\r');
+                        if (nl) *nl = '\0';
+                        trim_newline(uname);
+                        if (strlen(uname) > 0)
+                        {
+                            pthread_mutex_lock(&clients_mutex);
+                            int alias_taken = 0;
+                            for (int j = 0; j < MAX_CLIENTS; ++j)
+                            {
+                                if (clients[j] && strcmp(clients[j]->username, uname) == 0)
+                                {
+                                    alias_taken = 1;
+                                    break;
+                                }
+                            }
+                            pthread_mutex_unlock(&clients_mutex);
+
+                            if (!alias_taken)
+                            {
+                                strncpy(cli->username, uname, sizeof(cli->username) - 1);
+                                cli->username[sizeof(cli->username) - 1] = '\0';
+                            }
+                        }
+                    }
+                    authenticated = 1;
+                    break;
+                }
+            }
+
+            if (!auth_success)
+            {
+                ratelimit_release_ip_connection(cli->ip);
+                close(cli->sockfd);
+                free(cli);
+                pthread_detach(pthread_self());
+                return NULL;
+            }
+            break;
+        }
+
+        // Standard Unregistered Anonymous / Guest User
+        pthread_mutex_lock(&clients_mutex);
+        int taken = 0;
+        for (int i = 0; i < MAX_CLIENTS; ++i)
+        {
+            if (clients[i] && strcmp(clients[i]->username, name) == 0)
+            {
+                taken = 1;
+                break;
+            }
+        }
+        if (taken)
         {
             pthread_mutex_unlock(&clients_mutex);
             send_to_client(cli, "\033[1;31m[SERVER] Username already taken.\033[0m\n");
@@ -417,86 +674,13 @@ void *handle_client(void *arg)
             pthread_detach(pthread_self());
             return NULL;
         }
-    }
-    pthread_mutex_unlock(&clients_mutex);
+        pthread_mutex_unlock(&clients_mutex);
 
-    if (strcmp(cli->username, "admin") == 0)
-    {
-        char pwd[64];
-        int auth_success = 0;
-        for (int i = 0; i < MAX_TRIES; i++)
-        {
-            send(cli->sockfd, "ask\n", 4, 0);
-            int plen = recv(cli->sockfd, pwd, sizeof(pwd) - 1, 0);
-            if (plen <= 0)
-            {
-                break;
-            }
-            pwd[plen] = '\0';
-            trim_newline(pwd);
-
-            if (!db_verify_admin_password(pwd))
-            {
-                if (i == MAX_TRIES - 1)
-                {
-                    send_to_client(cli, "password wrong disconnecting...\n");
-                    break;
-                }
-                else
-                {
-                    send(cli->sockfd, "try\n", 4, 0);
-                }
-            }
-            else
-            {
-                cli->is_admin = 1;
-                auth_success = 1;
-                send(cli->sockfd, "true\n", 5, 0);
-
-                char uname[32];
-                int ulen = recv(cli->sockfd, uname, sizeof(uname) - 1, 0);
-                if (ulen > 0)
-                {
-                    uname[ulen] = '\0';
-                    char *nl = strchr(uname, '\n');
-                    if (nl) *nl = '\0';
-                    nl = strchr(uname, '\r');
-                    if (nl) *nl = '\0';
-                    trim_newline(uname);
-                    if (strlen(uname) > 0)
-                    {
-                        // Check if admin's chosen alias is taken
-                        pthread_mutex_lock(&clients_mutex);
-                        int alias_taken = 0;
-                        for (int j = 0; j < MAX_CLIENTS; ++j)
-                        {
-                            if (clients[j] && strcmp(clients[j]->username, uname) == 0)
-                            {
-                                alias_taken = 1;
-                                break;
-                            }
-                        }
-                        pthread_mutex_unlock(&clients_mutex);
-
-                        if (!alias_taken)
-                        {
-                            strncpy(cli->username, uname, sizeof(cli->username) - 1);
-                            cli->username[sizeof(cli->username) - 1] = '\0';
-                        }
-                    }
-                }
-                break;
-            }
-        }
-
-        if (!auth_success)
-        {
-            ratelimit_release_ip_connection(cli->ip);
-            close(cli->sockfd);
-            free(cli);
-            pthread_detach(pthread_self());
-            return NULL;
-        }
+        strncpy(cli->username, name, sizeof(cli->username) - 1);
+        cli->username[sizeof(cli->username) - 1] = '\0';
+        cli->is_registered = 0;
+        authenticated = 1;
+        break;
     }
 
     cli->join_time = time(NULL);
@@ -504,6 +688,8 @@ void *handle_client(void *arg)
     log_connection(cli->username, cli->ip);
     if (cli->is_admin)
         printf("\033[1;35m %s JOINED AS -> ADMIN.\033[0m\n", cli->username);
+    else if (cli->is_registered)
+        printf("\033[1;32m %s JOINED AS -> REGISTERED MEMBER.\033[0m\n", cli->username);
     else
         printf("\033[1;39m %s  JOINED AS -> USER.\033[0m\n", cli->username);
 
@@ -520,8 +706,18 @@ void *handle_client(void *arg)
         return NULL;
     }
 
+    if (cli->is_registered)
+        send_to_client(cli, "__STATUS_REG__:1\n");
+    else
+        send_to_client(cli, "__STATUS_REG__:0\n");
+
     char join_msg[128];
-    snprintf(join_msg, sizeof(join_msg), "\033[1;32m[JOIN] %s has entered the chat.\033[0m\n", cli->username);
+    if (cli->is_admin)
+        snprintf(join_msg, sizeof(join_msg), "\033[1;35m[JOIN] %s (Admin) has entered the chat.\033[0m\n", cli->username);
+    else if (cli->is_registered)
+        snprintf(join_msg, sizeof(join_msg), "\033[1;32m[JOIN] @%s (Registered) has entered the chat.\033[0m\n", cli->username);
+    else
+        snprintf(join_msg, sizeof(join_msg), "\033[1;32m[JOIN] %s has entered the chat.\033[0m\n", cli->username);
     party_broadcast_system(join_msg, cli->sockfd);
 
     send_to_client(cli, "\033[1;36mWelcome! Type /help for commands.\033[0m\n");
