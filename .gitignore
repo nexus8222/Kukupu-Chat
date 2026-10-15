@@ -1,12 +1,13 @@
 # Binaries
-server
-client
-test_e2e_full
+/server
+/client
+/test_e2e_full
 
 # Objects & Archives
 *.o
 *.a
 *.so
+build/
 
 # Runtime generated databases and persistence files
 admin.cred
