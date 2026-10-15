@@ -38,12 +38,13 @@ static int history_pos = 0;
 
 static const char *tab_commands[] = {
     "/help", "/msg", "/e2ee", "/sendfile", "/fileaccept", "/filedecline",
+    "/editlast", "/deletelast",
     "/whoami", "/users", "/ping", "/time", "/uptime", "/motd", "/clear",
     "/lastseen", "/setcolor", "/colorlist", "/createparty", "/joinparty",
     "/party", "/leaveparty", "/guessgame", "/guess", "/vanish", "/emoji",
     "/exit", "/kick", "/ban", "/unban", "/banlist", "/mute", "/unmute",
     "/mutelist", "/setadminpwd", "/broadcast", "/pin", "/setmotd", "/log",
-    "/shutdown", "/parties", "/lockparty", "/invite", "/partyinfo", "/whois",
+    "/shutdown", "/parties", "/lockparty", "/unlockparty", "/invite", "/partyinfo", "/whois",
     NULL
 };
 
@@ -328,10 +329,43 @@ static void handle_received_line(char *line)
         return;
     }
 
-    if (strstr(clean, "Online users:"))
+    if (strstr(clean, "Online users:") || strstr(clean, "Connected users in your party:"))
     {
-        char *ptr = strstr(clean, "Online users:");
-        if (ptr) ui_set_users_from_string(ptr + 13);
+        ui_add_message(MSG_SYSTEM, "Server", clean, 0);
+        return;
+    }
+
+    if (strncmp(clean, " - ", 3) == 0)
+    {
+        char uname[32] = {0};
+        if (sscanf(clean + 3, "%31s", uname) == 1)
+        {
+            ui_add_user(uname);
+        }
+        ui_add_message(MSG_SYSTEM, "Server", clean, 0);
+        return;
+    }
+
+    if ((strstr(clean, "Party '") && strstr(clean, "created")) || strstr(clean, "Joined party '"))
+    {
+        char room_code[16] = {0};
+        char *q1 = strchr(clean, '\'');
+        if (q1)
+        {
+            char *q2 = strchr(q1 + 1, '\'');
+            if (q2 && (q2 - q1 - 1 < (int)sizeof(room_code)))
+            {
+                strncpy(room_code, q1 + 1, q2 - q1 - 1);
+                ui_set_room(room_code);
+            }
+        }
+        ui_add_message(MSG_SYSTEM, "Server", clean, 0);
+        return;
+    }
+
+    if (strstr(clean, "rejoined the public room"))
+    {
+        ui_set_room("0000");
         ui_add_message(MSG_SYSTEM, "Server", clean, 0);
         return;
     }
@@ -733,6 +767,65 @@ static void chat_loop(void)
                     current_suggestion[0] = '\0';
                     ui_render(input, cursor_pos, current_suggestion);
                     continue;
+                }
+
+                if (strcmp(input, "/emoji") == 0)
+                {
+                    ui_add_message(MSG_SYSTEM, "Emoji", "======[ Emoji Catalog (use /emoji <id>) ]======", 0);
+                    char row[256];
+                    row[0] = '\0';
+                    for (int i = 0; i < EMOJI_COUNT; ++i)
+                    {
+                        char item[32];
+                        snprintf(item, sizeof(item), "%2d. %s  ", i + 1, get_emoji_by_index(i + 1));
+                        strncat(row, item, sizeof(row) - strlen(row) - 1);
+                        if ((i + 1) % 8 == 0 || i == EMOJI_COUNT - 1)
+                        {
+                            ui_add_message(MSG_SYSTEM, "Emoji", row, 0);
+                            row[0] = '\0';
+                        }
+                    }
+                    ui_add_message(MSG_SYSTEM, "Emoji", "Type /emoji <number> to send an emoji.", 0);
+                    input_len = 0;
+                    cursor_pos = 0;
+                    input[0] = '\0';
+                    current_suggestion[0] = '\0';
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
+                if (strncmp(input, "/emoji ", 7) == 0)
+                {
+                    int num = 0;
+                    if (sscanf(input + 7, "%d", &num) == 1)
+                    {
+                        const char *em = get_emoji_by_index(num);
+                        if (em)
+                        {
+                            char send_buf[INPUT_BUFFER + 4];
+                            snprintf(send_buf, sizeof(send_buf), "%s\n", em);
+                            send(sockfd, send_buf, strlen(send_buf), 0);
+                        }
+                        else
+                        {
+                            ui_add_message(MSG_ERROR, "Emoji", "Invalid emoji index. Type /emoji to view all.", 0);
+                        }
+                    }
+                    input_len = 0;
+                    cursor_pos = 0;
+                    input[0] = '\0';
+                    current_suggestion[0] = '\0';
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
+                if (strncmp(input, "/createparty ", 13) == 0)
+                {
+                    char pcode[16] = {0};
+                    if (sscanf(input + 13, "%15s", pcode) == 1)
+                    {
+                        ui_set_room(pcode);
+                    }
                 }
 
                 if (strncmp(input, "/joinparty ", 11) == 0)

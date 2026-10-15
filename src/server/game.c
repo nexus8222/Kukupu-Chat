@@ -31,10 +31,10 @@ void start_guess_game(client_t *cli) {
     guess_game.current_turn[USERNAME_LEN - 1] = '\0';
     pthread_mutex_unlock(&game_mutex);
 
-    broadcast_message("[GAME] Number Guessing Game started! Guess a number between 1 and 100 using /guess <num>", NULL);
+    broadcast_message("[GAME] Number Guessing Game started! Guess a number between 1 and 100 using /guess <num>\n", NULL);
 
     char msg[128];
-    snprintf(msg, sizeof(msg), "[GAME] %s will guess first. Use /guess <number>", cli->username);
+    snprintf(msg, sizeof(msg), "[GAME] %s will guess first. Use /guess <number>\n", cli->username);
     broadcast_message(msg, NULL);
 }
 
@@ -67,16 +67,16 @@ void handle_guess_command(client_t *cli, const char *arg) {
     char result_msg[256];
 
     if (guess == guess_game.number_to_guess) {
-        snprintf(result_msg, sizeof(result_msg), "[GAME] %s guessed the correct number: %d!", cli->username, guess);
+        snprintf(result_msg, sizeof(result_msg), "[GAME] %s guessed the correct number: %d!\n", cli->username, guess);
         guess_game.active = 0;
         guess_game.current_turn[0] = '\0';
         pthread_mutex_unlock(&game_mutex);
         broadcast_message(result_msg, NULL);
         return;
     } else if (guess < guess_game.number_to_guess) {
-        snprintf(result_msg, sizeof(result_msg), "[GAME] %s guessed too low!", cli->username);
+        snprintf(result_msg, sizeof(result_msg), "[GAME] %s guessed too low!\n", cli->username);
     } else {
-        snprintf(result_msg, sizeof(result_msg), "[GAME] %s guessed too high!", cli->username);
+        snprintf(result_msg, sizeof(result_msg), "[GAME] %s guessed too high!\n", cli->username);
     }
 
     // Switch turn
@@ -98,7 +98,7 @@ void handle_guess_command(client_t *cli, const char *arg) {
 
     char turn_msg[128];
     if (found_next) {
-        snprintf(turn_msg, sizeof(turn_msg), "[GAME] %s will guess next. Use /guess <number>", guess_game.current_turn);
+        snprintf(turn_msg, sizeof(turn_msg), "[GAME] %s will guess next. Use /guess <number>\n", guess_game.current_turn);
     } else {
         // Fallback to current player
         strncpy(guess_game.current_turn, cli->username, USERNAME_LEN - 1);

@@ -40,6 +40,11 @@ void log_connection(const char *username, const char *ip) {
     timestamp(ts, sizeof(ts));
     pthread_mutex_lock(&log_mutex);
     printf("\033[1;32m[%s] CONNECT: %s (%s)\033[0m\n", ts, username, ip);
+    FILE *fp = fopen("server.log", "a");
+    if (fp) {
+        fprintf(fp, "[%s] CONNECT: %s (%s)\n", ts, username, ip);
+        fclose(fp);
+    }
     pthread_mutex_unlock(&log_mutex);
 }
 
@@ -48,6 +53,11 @@ void log_disconnection(const char *username, const char *ip) {
     timestamp(ts, sizeof(ts));
     pthread_mutex_lock(&log_mutex);
     printf("\033[1;31m[%s] DISCONNECT: %s (%s)\033[0m\n", ts, username, ip);
+    FILE *fp = fopen("server.log", "a");
+    if (fp) {
+        fprintf(fp, "[%s] DISCONNECT: %s (%s)\n", ts, username, ip);
+        fclose(fp);
+    }
     pthread_mutex_unlock(&log_mutex);
 }
 
@@ -56,6 +66,11 @@ void log_server_start(int port) {
     timestamp(ts, sizeof(ts));
     pthread_mutex_lock(&log_mutex);
     printf("\033[1;34m[%s] SERVER STARTED on port %d\033[0m\n", ts, port);
+    FILE *fp = fopen("server.log", "a");
+    if (fp) {
+        fprintf(fp, "[%s] SERVER STARTED on port %d\n", ts, port);
+        fclose(fp);
+    }
     pthread_mutex_unlock(&log_mutex);
 }
 

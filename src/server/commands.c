@@ -20,6 +20,7 @@
 #include "lastseen.h"
 #include "game.h"
 #include "db.h"
+#include "emoji.h"
 extern client_t *clients[MAX_CLIENTS];
 extern time_t server_start_time;
 extern lastseen_t lastseen_list[MAX_CLIENTS];
@@ -109,6 +110,7 @@ int handle_command(const char *cmdline, client_t *cli)
                                        " /shutdown            - Shutdown the server\n"
                                        " /parties             - List active parties\n"
                                        " /lockparty           - Lock current party\n"
+                                       " /unlockparty         - Unlock current party\n"
                                        " /invite <user>       - Invite user to locked party\n"
                                        " /partyinfo <code>    - View users in a party\n"
                                        " /whois <username>    - Get info about a user\n\n"
@@ -116,9 +118,16 @@ int handle_command(const char *cmdline, client_t *cli)
 
         return 1;
     }
-    if (strcmp(command, "guessgame") == 0 && strcmp(arg1, "start") == 0)
+    if (strcmp(command, "guessgame") == 0)
     {
-        start_guess_game(cli);
+        if (strcmp(arg1, "start") == 0)
+        {
+            start_guess_game(cli);
+        }
+        else
+        {
+            send_to_client(cli, "[GAME] Usage: /guessgame start\n");
+        }
         return 1;
     }
 
@@ -126,6 +135,49 @@ int handle_command(const char *cmdline, client_t *cli)
     {
         handle_guess_command(cli, arg1);
         return 1;
+    }
+
+    if (strcmp(command, "emoji") == 0)
+    {
+        if (strlen(arg1) == 0)
+        {
+            char emojimenu[BUFFER_SIZE];
+            emojimenu[0] = '\0';
+            strcat(emojimenu, "\033[1m======[ Emoji Catalog (use /emoji <id>) ]======\033[0m\n");
+            for (int i = 0; i < EMOJI_COUNT; ++i)
+            {
+                char item[32];
+                snprintf(item, sizeof(item), "%2d. %s  ", i + 1, get_emoji_by_index(i + 1));
+                strcat(emojimenu, item);
+                if ((i + 1) % 8 == 0)
+                {
+                    strcat(emojimenu, "\n");
+                }
+            }
+            strcat(emojimenu, "\nType /emoji <number> to send an emoji.\n");
+            send_to_client(cli, "%s", emojimenu);
+            return 1;
+        }
+        else
+        {
+            int num = atoi(arg1);
+            const char *em = get_emoji_by_index(num);
+            if (em)
+            {
+                char msg[512];
+                snprintf(msg, sizeof(msg), "%s[%s]:%s %s\n",
+                         cli->color, cli->username, COLOR_RESET, em);
+                broadcast_message(msg, cli);
+                strncpy(cli->last_msg, em, BUFFER_SIZE - 1);
+                cli->last_msg[BUFFER_SIZE - 1] = '\0';
+                cli->last_msg_time = time(NULL);
+            }
+            else
+            {
+                send_to_client(cli, "[SERVER] Invalid emoji index. Use /emoji to view all (1-%d).\n", EMOJI_COUNT);
+            }
+            return 1;
+        }
     }
 
     if (strcmp(command, "lockparty") == 0 && cli->is_admin)
@@ -182,7 +234,7 @@ int handle_command(const char *cmdline, client_t *cli)
 
         // Relay PM to target
         char outbuf[BUFFER_SIZE];
-        snprintf(outbuf, sizeof(outbuf), "__PRIVATE__:%s:%s", cli->username, arg2);
+        snprintf(outbuf, sizeof(outbuf), "__PRIVATE__:%s:%s\n", cli->username, arg2);
         send(target->sockfd, outbuf, strlen(outbuf), 0);
 
         // Notify sender too
@@ -315,7 +367,10 @@ int handle_command(const char *cmdline, client_t *cli)
         else
         {
             char newmsg[BUFFER_SIZE];
-            snprintf(newmsg, sizeof(newmsg), "%s %s", arg1, arg2);
+            if (strlen(arg2) > 0)
+                snprintf(newmsg, sizeof(newmsg), "%s %s", arg1, arg2);
+            else
+                snprintf(newmsg, sizeof(newmsg), "%s", arg1);
 
             char edited[BUFFER_SIZE * 2];
             snprintf(edited, sizeof(edited), "\033[1;33m[EDITED] %s: %s\033[0m\n", cli->username, newmsg);

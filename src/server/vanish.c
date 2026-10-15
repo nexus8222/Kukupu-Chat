@@ -68,7 +68,7 @@ void handle_vanish_command(client_t *cli, const char *args)
 
     char broadcast_buf[MSG_LEN + 128];
     snprintf(broadcast_buf, sizeof(broadcast_buf),
-             "__VANISH__:%d:%d:%s: %s", msg_id, seconds, cli->username, message);
+             "__VANISH__:%d:%d:%s: %s\n", msg_id, seconds, cli->username, message);
     broadcast_message(broadcast_buf, cli);
 }
 
@@ -82,7 +82,7 @@ void check_and_expire_vanish_messages()
         if (difftime(now, vm->timestamp) >= vm->duration)
         {
             char delete_msg[64];
-            snprintf(delete_msg, sizeof(delete_msg), "__DELETE__:%d", vm->msg_id);
+            snprintf(delete_msg, sizeof(delete_msg), "__DELETE__:%d\n", vm->msg_id);
             broadcast_message(delete_msg, NULL);
 
             vanish_messages[i] = vanish_messages[--vanish_count];

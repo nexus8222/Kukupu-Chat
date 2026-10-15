@@ -67,7 +67,10 @@ test: $(TARGET_SERVER) $(TARGET_CLIENT) $(TARGET_TEST)
 	kill -9 $$SRV_PID 2>/dev/null || true; \
 	exit $$TEST_RES
 
+test-commands: $(TARGET_SERVER)
+	python3 tests/test_all_commands.py
 
+test-all: test test-commands
 
 $(TARGET_TEST): $(TESTS_DIR)/test_e2e_full.c $(BUILD_DIR)/common/crypto_utils.o $(BUILD_DIR)/client/e2ee.o $(BUILD_DIR)/client/file_transfer.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)

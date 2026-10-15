@@ -655,34 +655,58 @@ Complete directory tree of Kukupu Chat:
 ├── README.md           # Comprehensive project manual and ASCII interface diagram
 ├── mind.md             # Master cognitive architecture & blueprint
 │
-├── common.h            # Global macro definitions, client_t structure, port numbers, buffer sizes
-├── client.h            # Shared client helper declarations (send_to_client, broadcast)
-├── utils.h / utils.c   # String manipulation, newline trimming, formatted send helpers
+├── include/            # C Header files & interface definitions
+│   ├── common.h        # Protocol constants, client_t structure, buffer limits, ANSI themes
+│   ├── client.h        # Shared client connection definitions
+│   ├── crypto_utils.h  # OpenSSL 3.0 crypto wrappers (X25519, HKDF, AES-256-GCM, PBKDF2)
+│   ├── e2ee.h          # Signal Double Ratchet session definitions & packet envelopes
+│   ├── file_transfer.h # In-band chunked file streaming engine & SHA-256 verification
+│   ├── ratelimit.h     # Token bucket rate limiter & IP connection tracker
+│   ├── db.h            # PBKDF2 credential storage, offline inbox & key directory
+│   ├── ui.h            # Zero-flicker double-buffered full-screen terminal TUI engine
+│   ├── admin.h         # Administrative moderation declarations
+│   ├── commands.h      # Slash command routing table declarations
+│   ├── banlist.h       # IP ban manager definitions
+│   ├── mute.h          # User mute tracking definitions
+│   ├── party.h         # Multi-room channel management declarations
+│   ├── vanish.h        # Ephemeral vanishing message definitions
+│   ├── game.h          # Number guessing game engine declarations
+│   ├── emoji.h         # 80-item categorized ASCII/Unicode catalog
+│   ├── lastseen.h      # User logout tracking definitions
+│   ├── log.h           # Timestamped operational audit logging
+│   ├── motd.h          # Message of the Day definitions
+│   ├── pwdgen.h        # Administrative credential helpers
+│   └── utils.h         # Server broadcast and client search utilities
 │
-├── server.c            # Master daemon: socket init, accept loop, client threading, admin auth
-├── client.c            # Production client: raw mode termios, select() multiplexing, command loop
-├── ui.h / ui.c         # Zero-flicker double-buffered full-screen terminal TUI engine
+├── src/                # Modular C source code implementations
+│   ├── common/         # Common logic shared across binaries
+│   │   ├── crypto_utils.c # OpenSSL 3.0 cryptographic primitives
+│   │   └── emoji.c     # Emoji & symbol catalog implementations
+│   ├── client/         # Client terminal application
+│   │   ├── client.c    # Client main loop, raw termios, socket select multiplexer
+│   │   ├── ui.c        # ANSI/VT100 double-buffered terminal windowing engine
+│   │   ├── e2ee.c      # Double Ratchet state machine & key management
+│   │   └── file_transfer.c # Base64 chunked transfer engine
+│   └── server/         # Server daemon & moderation subsystems
+│       ├── server.c    # Socket listener, multi-threaded worker pools
+│       ├── admin.c     # Administrative moderation implementations
+│       ├── commands.c  # Slash command execution engine
+│       ├── banlist.c   # Persistent IP ban management
+│       ├── db.c        # PBKDF2 credential storage, offline inbox & key directory
+│       ├── game.c      # Turn-based number guessing mini-game
+│       ├── lastseen.c  # Last-seen persistence engine
+│       ├── log.c       # Real-time event logger writing to server.log
+│       ├── motd.c      # MOTD loader and updater
+│       ├── mute.c      # Mute list enforcement
+│       ├── party.c     # Room and channel isolation logic
+│       ├── pwdgen.c    # Password generation and verification
+│       ├── ratelimit.c # Token bucket anti-spam engine
+│       ├── utils.c     # Message broadcasting & user search
+│       └── vanish.c    # Ephemeral message decay thread
 │
-├── crypto_utils.h / .c # OpenSSL 3.0 crypto: X25519, HKDF-SHA256, AES-256-GCM, PBKDF2
-├── e2ee.h / .c         # Signal Double Ratchet session management and packet envelopes
-├── file_transfer.h / .c# In-band chunked file streaming engine with SHA-256 integrity
-├── ratelimit.h / .c    # Token bucket rate limiter & per-IP connection DoS defense
-├── db.h / .c           # PBKDF2 credential storage, offline inbox & key directory
-│
-├── commands.h / .c     # Command router: parsing /help, /msg, /time, /uptime, /setcolor, etc.
-├── admin.h / admin.c   # Administrative command implementations: kick, ban, unban, pin, whois
-├── banlist.h / .c      # IP ban engine with persistent disk storage in banned.txt
-├── mute.h / mute.c     # User muting logic and active mutelist inspection
-├── party.h / party.c   # Multi-room party engine: creation, joining, locking, and invites
-├── vanish.h / vanish.c # Ephemeral vanishing message engine & background cleaner thread
-├── game.h / game.c     # Number guessing game state machine and turn cycling
-├── pwdgen.h / pwdgen.c # Legacy administrative password verification
-├── emoji.h / emoji.c   # 80-item categorized UTF-8 emoji table and interactive panel
-├── lastseen.h / .c     # Binary serialized user logout tracker (.lastseen)
-├── motd.h / motd.c     # Message of the Day loader and updater (motd.txt)
-├── log.h / log.c       # Timestamped operational event logger writing to server.log
-│
-└── test_e2e_full.c     # Socket-level automated end-to-end integration test suite
+└── tests/              # Automated verification test suites
+    ├── test_e2e_full.c # Socket-level automated end-to-end integration test suite
+    └── test_all_commands.py # Live socket test suite for all 44 /help commands
 ```
 
 ---
@@ -691,7 +715,7 @@ Complete directory tree of Kukupu Chat:
 
 ### Compiling from Source
 
-Using the provided [`phase-6/Makefile`](file:///home/sahilrana/Music/chatapp/Chat-App/phase-6/Makefile):
+Using the provided root [`Makefile`](file:///home/sahilrana/Music/chatapp/Chat-App/Makefile):
 
 ```bash
 # Build both server and client binaries with optimization and thread flags:
@@ -816,12 +840,13 @@ docker-compose up -d --build
 - **Live Typing Indicators**: Low-overhead `__TYPING__` packet broadcast notifying peers in real-time when another user is composing a message.
 
 ### 11.6 Full Verification & Automated End-to-End Test Suite
-- Comprehensive automated multi-client test harness implemented in `test_e2e_full.c` verifying:
+- Comprehensive automated multi-client test harness implemented in `tests/test_e2e_full.c` and `tests/test_all_commands.py` (`make test`, `make test-commands`, `make test-all`) verifying:
   1. Multi-round bidirectional Double Ratchet message encryption and decryption.
   2. 5KB chunked file transfer with SHA-256 checksum verification.
   3. Token bucket rate limiting, warnings, and auto-muting.
   4. Offline messaging inbox persistence and reconnection replay.
   5. PBKDF2 admin login, dynamic password update, and authentication enforcement.
+  6. Live verification of all 44 commands in `/help` across messaging, parties, games, customization, and administration.
 - Tested across multiple consecutive runs with **100% pass rate** and **0 compiler warnings** under `-Wall -Wextra -pthread -O2`.
 
 ---

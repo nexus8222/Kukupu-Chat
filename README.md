@@ -130,41 +130,67 @@ A high-performance, multithreaded terminal chat server and client written in pur
 
 ## Project Structure
 
-```
-.
-├── Makefile                # Strict compiler build system (-Wall -Wextra -pthread -O2)
-├── Dockerfile              # Containerized build & runtime environment
-├── docker-compose.yml      # Service orchestration manifest
-├── README.md               # Complete project documentation
-├── mind.md                 # Full technical specification & architecture logs
+```text
+kukupu-chat/
+├── Makefile                # Unified build system with modular target compilation
+├── Dockerfile              # Containerized build & isolated runtime definition
+├── docker-compose.yml      # Orchestration definition for single-command deploy
+├── README.md               # Comprehensive architectural documentation & guides
+├── mind.md                 # Detailed security audit & cryptographic specification
 ├── checklist               # Development tracking roadmap
 │
-├── server.c                # Master server daemon & socket accept loop
-├── client.c                # Production client with raw termios & event multiplexing
-├── ui.h / ui.c             # Full-screen terminal user interface (TUI) engine
+├── include/                # Header definitions & public APIs
+│   ├── admin.h             # Moderation control declarations
+│   ├── banlist.h           # IP ban list manager definitions
+│   ├── client.h            # Client session & connection definitions
+│   ├── commands.h          # Command dispatch declarations
+│   ├── common.h            # Protocol constants, buffer limits & color palette
+│   ├── crypto_utils.h      # OpenSSL 3.0 X25519, HKDF, AES-256-GCM, PBKDF2 APIs
+│   ├── db.h                # PBKDF2 credential storage, offline inbox & key store
+│   ├── e2ee.h              # Signal Double Ratchet protocol declarations
+│   ├── emoji.h             # 80-item categorized ASCII/Unicode catalog
+│   ├── file_transfer.h     # Chunked file streaming & SHA-256 integrity APIs
+│   ├── game.h              # Number guessing mini-game engine
+│   ├── lastseen.h          # Binary serialized logout tracker definitions
+│   ├── log.h               # Server event and audit logging APIs
+│   ├── motd.h              # Message of the Day definitions
+│   ├── mute.h              # User muting logic and mutelist definitions
+│   ├── party.h             # Multi-room channel management declarations
+│   ├── pwdgen.h            # Administrative credential helper functions
+│   ├── ratelimit.h         # Token bucket & IP rate limiting headers
+│   ├── ui.h                # Terminal user interface (TUI) engine definitions
+│   ├── utils.h             # Server broadcast and client search utilities
+│   └── vanish.h            # Ephemeral message self-destruct definitions
 │
-├── crypto_utils.h / .c     # OpenSSL 3.0 wrappers: X25519, HKDF, AES-256-GCM, PBKDF2
-├── e2ee.h / .c             # Signal Double Ratchet protocol implementation
-├── file_transfer.h / .c    # In-band chunked file streaming & SHA-256 verification
-├── ratelimit.h / .c        # Token bucket rate limiter & IP connection tracker
-├── db.h / .c               # PBKDF2 credential storage, offline inbox & key directory
+├── src/                    # Modular source code implementations
+│   ├── common/             # Shared cryptographic & catalog logic
+│   │   ├── crypto_utils.c  # OpenSSL 3.0 wrappers & primitives
+│   │   └── emoji.c         # Emoji and symbol catalog definitions
+│   ├── client/             # Client application & terminal interface
+│   │   ├── client.c        # Event loop, socket multiplexing & tab completion
+│   │   ├── ui.c            # Full-screen TUI rendering engine
+│   │   ├── e2ee.c          # Double Ratchet state machine & key management
+│   │   └── file_transfer.c # Base64 chunk streaming & verification engine
+│   └── server/             # Server daemon & moderation subsystems
+│       ├── server.c        # Main socket listener & worker threads
+│       ├── admin.c         # Administrative moderation handlers
+│       ├── commands.c      # Slash command routing table
+│       ├── banlist.c       # Persistent IP ban management
+│       ├── db.c            # Secure credential database & inbox storage
+│       ├── game.c          # Turn-based guessing game
+│       ├── lastseen.c      # Last-seen persistence engine
+│       ├── log.c           # Real-time event logging
+│       ├── motd.c          # MOTD loader & live updater
+│       ├── mute.c          # Mute list enforcement
+│       ├── party.c         # Room and channel isolation logic
+│       ├── pwdgen.c        # Credential hashing & generation
+│       ├── ratelimit.c     # Token bucket anti-spam algorithm
+│       ├── utils.c         # Message broadcasting & user lookups
+│       └── vanish.c        # Ephemeral message decay thread
 │
-├── admin.h / .c            # Moderation controls: /kick, /ban, /unban, /whois
-├── commands.h / .c         # User command dispatch table & argument parsing
-├── banlist.h / .c          # IP ban list manager with persistent storage
-├── mute.h / .c             # User muting logic and mutelist tracking
-├── party.h / .c            # Multi-room channel management & room locking
-├── vanish.h / .c           # Ephemeral self-destructing message decay thread
-├── game.h / .c             # Turn-based number guessing mini-game
-├── emoji.h / .c            # 80-item categorized UTF-8 emoji catalog
-├── lastseen.h / .c         # Binary serialized user logout tracker
-├── log.h / .c              # Timestamped event and audit logger
-├── motd.h / .c             # Message of the Day loader and updater
-├── pwdgen.h / .c           # Legacy administrative cipher helpers
-├── utils.h / .c            # String trimming and socket formatting utilities
-├── common.h / client.h     # Shared data structures and protocol constants
-│
-└── test_e2e_full.c         # Automated socket-level verification suite
+└── tests/                  # Automated verification test suites
+    ├── test_e2e_full.c     # Socket-level integration suite (E2EE, files, inbox, auth)
+    └── test_all_commands.py# Full coverage test suite for all /help commands
 ```
 
 ---
@@ -334,14 +360,16 @@ The server uses an internal protocol router (`handle_internal_protocol`) to diff
 
 The repository includes a comprehensive, multi-client socket-level integration test suite in [`test_e2e_full.c`](test_e2e_full.c). It tests concurrent clients connected over live TCP sockets against the server.
 
-### Run the Test Suite:
+### Run the Test Suites:
 ```bash
-# Terminal 1: Start the Server
-./server
+# 1. Run the full C integration test suite (automatically starts & stops test server):
+make test
 
-# Terminal 2: Compile & Run the Tests
-gcc -Wall -Wextra -pthread -O2 test_e2e_full.c crypto_utils.c e2ee.c file_transfer.c -o test_e2e_full -lssl -lcrypto
-./test_e2e_full
+# 2. Run the /help command coverage suite (tests all 44 commands over live sockets):
+make test-commands
+
+# 3. Run all test suites:
+make test-all
 ```
 
 ### Verification Coverage:
