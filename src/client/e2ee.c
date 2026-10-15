@@ -24,6 +24,7 @@ void e2ee_cleanup()
         EVP_PKEY_free(g_e2ee.identity_key);
         g_e2ee.identity_key = NULL;
     }
+    OPENSSL_cleanse(g_e2ee.identity_pub, sizeof(g_e2ee.identity_pub));
     for (int i = 0; i < g_e2ee.session_count; ++i)
     {
         if (g_e2ee.sessions[i].our_ratchet_dh)
@@ -31,6 +32,9 @@ void e2ee_cleanup()
             EVP_PKEY_free(g_e2ee.sessions[i].our_ratchet_dh);
             g_e2ee.sessions[i].our_ratchet_dh = NULL;
         }
+        OPENSSL_cleanse(g_e2ee.sessions[i].root_key, 32);
+        OPENSSL_cleanse(g_e2ee.sessions[i].send_chain_key, 32);
+        OPENSSL_cleanse(g_e2ee.sessions[i].recv_chain_key, 32);
     }
     g_e2ee.session_count = 0;
 }
@@ -132,6 +136,7 @@ int e2ee_encrypt_message(const char *peer_username, const char *plaintext, char 
     int ct_len = aes_gcm_encrypt(msg_key, iv, (unsigned char *)aad, strlen(aad),
                                  (const unsigned char *)plaintext, pt_len,
                                  ciphertext, tag);
+    OPENSSL_cleanse(msg_key, sizeof(msg_key));
     if (ct_len < 0) return -1;
 
     char ik_hex[X25519_HEX_LEN];
@@ -276,8 +281,9 @@ int e2ee_decrypt_packet(const char *packet, char *out_from, char *out_plaintext,
         snprintf(aad, sizeof(aad), "%s:%d", from, seq);
         pt_len = aes_gcm_decrypt(msg_key, iv, (unsigned char *)aad, strlen(aad),
                                  ct, (size_t)ct_len, tag, pt);
-        if (pt_len < 0) return -1;
     }
+    OPENSSL_cleanse(msg_key, sizeof(msg_key));
+    if (pt_len < 0) return -1;
 
     pt[pt_len] = '\0';
     strncpy(out_from, from, USERNAME_LEN - 1);

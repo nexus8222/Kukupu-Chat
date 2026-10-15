@@ -34,15 +34,33 @@ int kick_user(const char *target, client_t *requester) {
         send_to_client(requester, "\033[1;33m[ADMIN] Usage: /kick <user>\033[0m\n");
         return 0;
     }
-    client_t *victim = find_client_by_name(target);
+
+    pthread_mutex_lock(&clients_mutex);
+    client_t *victim = NULL;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i] && strcmp(clients[i]->username, target) == 0) {
+            victim = clients[i];
+            break;
+        }
+    }
+
     if (!victim) {
+        pthread_mutex_unlock(&clients_mutex);
         send_to_client(requester, "\033[1;33m[ADMIN] User not found.\033[0m\n");
         return 0;
     }
 
+    if (victim->is_admin) {
+        pthread_mutex_unlock(&clients_mutex);
+        send_to_client(requester, "\033[1;31m[ADMIN] You cannot kick another admin.\033[0m\n");
+        return 0;
+    }
+
     send_to_client(victim, "\033[1;31m[SERVER] You have been kicked by admin.\033[0m\n");
-    shutdown(victim->sockfd, SHUT_RDWR);
-    close(victim->sockfd);
+    int sock = victim->sockfd;
+    pthread_mutex_unlock(&clients_mutex);
+
+    shutdown(sock, SHUT_RDWR);
     send_to_client(requester, "\033[1;32m[ADMIN] User kicked.\033[0m\n");
     return 1;
 }
@@ -52,13 +70,32 @@ int ban_user(const char *target, client_t *requester) {
         send_to_client(requester, "\033[1;33m[ADMIN] Usage: /ban <user>\033[0m\n");
         return 0;
     }
-    client_t *victim = find_client_by_name(target);
+
+    pthread_mutex_lock(&clients_mutex);
+    client_t *victim = NULL;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i] && strcmp(clients[i]->username, target) == 0) {
+            victim = clients[i];
+            break;
+        }
+    }
+
     if (victim) {
-        ban_ip(victim->ip);
+        if (victim->is_admin) {
+            pthread_mutex_unlock(&clients_mutex);
+            send_to_client(requester, "\033[1;31m[ADMIN] You cannot ban another admin.\033[0m\n");
+            return 0;
+        }
+        char victim_ip[INET_ADDRSTRLEN];
+        snprintf(victim_ip, sizeof(victim_ip), "%s", victim->ip);
+        int sock = victim->sockfd;
         send_to_client(victim, "\033[1;31m[SERVER] You are banned.\033[0m\n");
-        shutdown(victim->sockfd, SHUT_RDWR);
-        close(victim->sockfd);
+        pthread_mutex_unlock(&clients_mutex);
+
+        ban_ip(victim_ip);
+        shutdown(sock, SHUT_RDWR);
     } else {
+        pthread_mutex_unlock(&clients_mutex);
         ban_ip(target);  // fallback for raw IP banning
     }
 

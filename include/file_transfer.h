@@ -6,6 +6,7 @@
 
 #define MAX_ACTIVE_TRANSFERS 8
 #define FILE_CHUNK_SIZE 1024
+#define MAX_FILE_SIZE (50 * 1024 * 1024) // 50MB max file transfer size
 
 typedef enum {
     TRANSFER_INACTIVE = 0,

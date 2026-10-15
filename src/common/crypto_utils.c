@@ -17,6 +17,14 @@ void hex_encode(const unsigned char *src, size_t len, char *dest, size_t dest_ma
     dest[len * 2] = '\0';
 }
 
+static int hex_val(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
 int hex_decode(const char *src, unsigned char *dest, size_t dest_max)
 {
     if (!src || !dest) return -1;
@@ -25,9 +33,10 @@ int hex_decode(const char *src, unsigned char *dest, size_t dest_max)
 
     for (size_t i = 0; i < len / 2; ++i)
     {
-        unsigned int val = 0;
-        if (sscanf(src + (i * 2), "%02x", &val) != 1) return -1;
-        dest[i] = (unsigned char)val;
+        int hi = hex_val(src[i * 2]);
+        int lo = hex_val(src[i * 2 + 1]);
+        if (hi < 0 || lo < 0) return -1;
+        dest[i] = (unsigned char)((hi << 4) | lo);
     }
     return (int)(len / 2);
 }

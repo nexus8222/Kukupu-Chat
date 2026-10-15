@@ -484,7 +484,7 @@ int handle_command(const char *cmdline, client_t *cli)
 
         char msg[BUFFER_SIZE];
         snprintf(msg, sizeof(msg), "[SERVER] Username color set to %s%s%s\n", cli->color, arg1, COLOR_RESET);
-        send_to_client(cli, msg);
+        send_to_client(cli, "%s", msg);
         return 1;
     }
 
@@ -551,6 +551,22 @@ int handle_command(const char *cmdline, client_t *cli)
         {
             strncpy(partycode, arg1, PARTY_CODE_LEN - 1);
             partycode[PARTY_CODE_LEN - 1] = '\0';
+        }
+
+        int valid_code = (strlen(partycode) >= 2);
+        for (size_t i = 0; partycode[i]; ++i)
+        {
+            char c = partycode[i];
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'))
+            {
+                valid_code = 0;
+                break;
+            }
+        }
+        if (!valid_code)
+        {
+            send_to_client(cli, "\033[1;31m[SERVER] Invalid party code. Use 2-32 alphanumeric characters.\033[0m\n");
+            return 1;
         }
 
         if (party_exists(partycode))

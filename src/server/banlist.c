@@ -1,8 +1,7 @@
-// banlist.c
-//Handles banlist and storage related things
 #include <stdio.h>
 #include <string.h>
 #include <arpa/inet.h> 
+#include <sys/stat.h>
 #include "banlist.h"
 #include "common.h"
 #include "client.h" 
@@ -39,6 +38,7 @@ void ban_ip(const char *ip) {
         if (fp) {
             fprintf(fp, "%s\n", ip);
             fclose(fp);
+            chmod(BAN_FILE, 0600);
         }
     }
     pthread_mutex_unlock(&banlist_mutex);
@@ -67,6 +67,7 @@ void unban_ip(const char *ip) {
                 fprintf(fp, "%s\n", banned_ips[i]);
             }
             fclose(fp);
+            chmod(BAN_FILE, 0600);
         }
     }
     pthread_mutex_unlock(&banlist_mutex);
@@ -94,10 +95,10 @@ void load_banlist() {
         return;
     }
 
-    char line[INET_ADDRSTRLEN];
+    char line[128];
     while (fgets(line, sizeof(line), fp)) {
         str_trim_lf(line, sizeof(line));
-        if (strlen(line) > 0 && banned_count < MAX_BANNED) {
+        if (strlen(line) > 0 && strlen(line) < INET_ADDRSTRLEN && banned_count < MAX_BANNED) {
             snprintf(banned_ips[banned_count], sizeof(banned_ips[banned_count]), "%s", line);
             banned_count++;
         }

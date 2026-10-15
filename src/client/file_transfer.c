@@ -149,19 +149,43 @@ int file_transfer_start_send(const char *peer_username, const char *filepath, in
 
 int file_transfer_handle_request(int id, const char *from, const char *filename, size_t filesize, const char *sha256)
 {
+    if (!from || !filename || !sha256) return -1;
+    if (filesize == 0 || filesize > MAX_FILE_SIZE) return -1;
+
+    // Sanitize filename against Path Traversal (CWE-22)
+    const char *base = filename;
+    const char *p1 = strrchr(base, '/');
+    if (p1) base = p1 + 1;
+    const char *p2 = strrchr(base, '\\');
+    if (p2) base = p2 + 1;
+
+    // Reject if filename contains traversal, leading dots, or invalid characters
+    if (strlen(base) == 0 || base[0] == '.' || strstr(base, "..") != NULL)
+        return -1;
+
+    for (size_t i = 0; base[i] != '\0'; ++i)
+    {
+        unsigned char c = (unsigned char)base[i];
+        if (c < 32 || c == 127 || c == ':' || c == '"' || c == '<' || c == '>' || c == '|' || c == '?' || c == '*')
+            return -1;
+    }
+
     file_transfer_t *t = find_free_transfer();
     if (!t) return -1;
 
     t->id = id;
     t->is_sender = 0;
     strncpy(t->peer, from, USERNAME_LEN - 1);
-    strncpy(t->filename, filename, sizeof(t->filename) - 1);
-    snprintf(t->filepath, sizeof(t->filepath), "downloads/%s", filename);
+    t->peer[USERNAME_LEN - 1] = '\0';
+    strncpy(t->filename, base, sizeof(t->filename) - 1);
+    t->filename[sizeof(t->filename) - 1] = '\0';
+    snprintf(t->filepath, sizeof(t->filepath), "downloads/%s", base);
     t->filesize = filesize;
     t->total_chunks = (int)((filesize + FILE_CHUNK_SIZE - 1) / FILE_CHUNK_SIZE);
     t->current_chunk = 0;
     t->bytes_transferred = 0;
     strncpy(t->expected_sha256, sha256, SHA256_HEX_LEN - 1);
+    t->expected_sha256[SHA256_HEX_LEN - 1] = '\0';
     t->state = TRANSFER_PENDING;
     t->last_activity = time(NULL);
 
@@ -279,6 +303,10 @@ int file_transfer_receive_chunk(int id, int chunk_seq, int total_chunks, const c
     unsigned char raw[FILE_CHUNK_SIZE * 2];
     size_t raw_len = 0;
     if (base64_decode(b64_data, raw, &raw_len) != 0 || raw_len == 0) return -1;
+
+    // Guard against data overflow exceeding declared filesize
+    if (t->bytes_transferred + raw_len > t->filesize + FILE_CHUNK_SIZE)
+        return -1;
 
     fwrite(raw, 1, raw_len, t->fp);
     t->bytes_transferred += raw_len;

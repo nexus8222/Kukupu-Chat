@@ -51,7 +51,21 @@ void handle_guess_command(client_t *cli, const char *arg) {
         return;
     }
 
-    if (strcmp(cli->username, guess_game.current_turn) != 0) {
+    // Check if previous turn player disconnected
+    int turn_player_online = 0;
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i] && clients[i]->active && strcmp(clients[i]->username, guess_game.current_turn) == 0) {
+            turn_player_online = 1;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+
+    if (!turn_player_online) {
+        strncpy(guess_game.current_turn, cli->username, USERNAME_LEN - 1);
+        guess_game.current_turn[USERNAME_LEN - 1] = '\0';
+    } else if (strcmp(cli->username, guess_game.current_turn) != 0) {
         pthread_mutex_unlock(&game_mutex);
         send_to_client(cli, "[GAME] It's not your turn. Wait for your turn.\n");
         return;

@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sys/stat.h>
 #include <openssl/rand.h>
 
 static pthread_mutex_t db_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -38,6 +39,7 @@ int db_set_admin_password(const char *new_pwd) {
 
     fprintf(f, "%s:%s\n", salt_hex, hash_hex);
     fclose(f);
+    chmod(DB_CRED_FILE, 0600);
 
     pthread_mutex_unlock(&db_lock);
     return 1;
@@ -92,6 +94,23 @@ int db_verify_admin_password(const char *pwd) {
 int db_store_offline_msg(const char *sender, const char *recipient, const char *content) {
     if (!sender || !recipient || !content) return 0;
 
+    pthread_mutex_lock(&db_lock);
+
+    // Enforce quota per user to prevent storage exhaustion DoS (CWE-400)
+    FILE *chk = fopen(DB_INBOX_FILE, "rb");
+    if (chk) {
+        offline_msg_t temp;
+        int user_count = 0;
+        while (fread(&temp, sizeof(offline_msg_t), 1, chk) == 1) {
+            if (strcmp(temp.recipient, recipient) == 0) user_count++;
+        }
+        fclose(chk);
+        if (user_count >= MAX_OFFLINE_PER_USER) {
+            pthread_mutex_unlock(&db_lock);
+            return 0; // Quota exceeded
+        }
+    }
+
     offline_msg_t msg;
     memset(&msg, 0, sizeof(msg));
     msg.timestamp = time(NULL);
@@ -99,7 +118,6 @@ int db_store_offline_msg(const char *sender, const char *recipient, const char *
     strncpy(msg.recipient, recipient, sizeof(msg.recipient) - 1);
     strncpy(msg.content, content, sizeof(msg.content) - 1);
 
-    pthread_mutex_lock(&db_lock);
     FILE *f = fopen(DB_INBOX_FILE, "ab");
     if (!f) {
         pthread_mutex_unlock(&db_lock);
@@ -108,6 +126,7 @@ int db_store_offline_msg(const char *sender, const char *recipient, const char *
 
     size_t written = fwrite(&msg, sizeof(offline_msg_t), 1, f);
     fclose(f);
+    chmod(DB_INBOX_FILE, 0600);
     pthread_mutex_unlock(&db_lock);
 
     return written == 1 ? 1 : 0;
@@ -145,6 +164,7 @@ int db_fetch_and_clear_offline_msgs(const char *recipient, offline_msg_t *out_ms
 
     remove(DB_INBOX_FILE);
     rename(DB_INBOX_FILE ".tmp", DB_INBOX_FILE);
+    chmod(DB_INBOX_FILE, 0600);
 
     pthread_mutex_unlock(&db_lock);
     return count;
@@ -186,6 +206,7 @@ int db_save_user_key(const char *username, const char *pubkey_hex) {
     fclose(tmp);
     remove(DB_KEYS_FILE);
     rename(DB_KEYS_FILE ".tmp", DB_KEYS_FILE);
+    chmod(DB_KEYS_FILE, 0600);
 
     pthread_mutex_unlock(&db_lock);
     return 1;

@@ -15,19 +15,32 @@ int mute_user(const char *target, client_t *requester) {
         send_to_client(requester, "\033[1;33m[ADMIN] Usage: /mute <user>\033[0m\n");
         return 0;
     }
-    client_t *victim = find_client_by_name(target);
+
+    pthread_mutex_lock(&clients_mutex);
+    client_t *victim = NULL;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i] && strcmp(clients[i]->username, target) == 0) {
+            victim = clients[i];
+            break;
+        }
+    }
+
     if (!victim) {
+        pthread_mutex_unlock(&clients_mutex);
         send_to_client(requester, "\033[1;33m[ADMIN] User not found.\033[0m\n");
         return 0;
     }
 
     if (victim->is_admin) {
+        pthread_mutex_unlock(&clients_mutex);
         send_to_client(requester, "\033[1;31m[ADMIN] You cannot mute another admin.\033[0m\n");
         return 0;
     }
 
     victim->is_muted = 1;
     send_to_client(victim, "\033[1;33m[SERVER] You have been muted.\033[0m\n");
+    pthread_mutex_unlock(&clients_mutex);
+
     send_to_client(requester, "\033[1;32m[ADMIN] User muted.\033[0m\n");
     return 1;
 }
@@ -37,14 +50,26 @@ int unmute_user(const char *target, client_t *requester) {
         send_to_client(requester, "\033[1;33m[ADMIN] Usage: /unmute <user>\033[0m\n");
         return 0;
     }
-    client_t *victim = find_client_by_name(target);
+
+    pthread_mutex_lock(&clients_mutex);
+    client_t *victim = NULL;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i] && strcmp(clients[i]->username, target) == 0) {
+            victim = clients[i];
+            break;
+        }
+    }
+
     if (!victim) {
+        pthread_mutex_unlock(&clients_mutex);
         send_to_client(requester, "\033[1;33m[ADMIN] User not found.\033[0m\n");
         return 0;
     }
 
     victim->is_muted = 0;
     send_to_client(victim, "\033[1;32m[SERVER] You have been unmuted.\033[0m\n");
+    pthread_mutex_unlock(&clients_mutex);
+
     send_to_client(requester, "\033[1;32m[ADMIN] User unmuted.\033[0m\n");
     return 1;
 }

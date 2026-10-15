@@ -22,6 +22,7 @@
 #include "crypto_utils.h"
 #include "file_transfer.h"
 #include "pwdgen.h"
+#include "motd.h"
 
 #define PORT 9001
 #define MAX_TRIES 5
@@ -55,20 +56,52 @@ void party_broadcast_system(const char *msg, int except_sock)
     pthread_mutex_unlock(&clients_mutex);
 }
 
-void add_client(client_t *cl)
+static int is_valid_username(const char *name)
+{
+    if (!name) return 0;
+    size_t len = strlen(name);
+    if (len < 2 || len > 28) return 0;
+
+    // Check reserved names
+    if (strcasecmp(name, "server") == 0 ||
+        strcasecmp(name, "system") == 0 ||
+        strcasecmp(name, "all") == 0 ||
+        strcasecmp(name, "root") == 0 ||
+        strcasecmp(name, "public") == 0)
+    {
+        return 0;
+    }
+
+    // Only allow alphanumeric, underscore, hyphen
+    for (size_t i = 0; i < len; ++i)
+    {
+        char c = name[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'))
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int add_client(client_t *cl)
 {
     pthread_mutex_lock(&clients_mutex);
-    strcpy(cl->color, "\033[0;37m");
+    strncpy(cl->color, "\033[0;37m", sizeof(cl->color) - 1);
+    cl->color[sizeof(cl->color) - 1] = '\0';
 
+    int added = 0;
     for (int i = 0; i < MAX_CLIENTS; ++i)
     {
         if (!clients[i])
         {
             clients[i] = cl;
+            added = 1;
             break;
         }
     }
     pthread_mutex_unlock(&clients_mutex);
+    return added;
 }
 
 client_t *get_client_by_name(const char *name)
@@ -195,6 +228,11 @@ static void handle_internal_protocol(const char *buffer, client_t *cli)
         if (sscanf(buffer, "__FILEREQ__:%d:%31[^:]:%255[^:]:%zu:%64s",
                    &fid, target_name, filename, &fsize, sha) == 5)
         {
+            if (fsize == 0 || fsize > MAX_FILE_SIZE || strstr(filename, "..") != NULL ||
+                strchr(filename, '/') != NULL || strchr(filename, '\\') != NULL)
+            {
+                return;
+            }
             pthread_mutex_lock(&clients_mutex);
             client_t *target = NULL;
             for (int i = 0; i < MAX_CLIENTS; ++i)
@@ -353,9 +391,9 @@ void *handle_client(void *arg)
     name[rlen] = '\0';
     trim_newline(name);
 
-    if (strlen(name) == 0)
+    if (strlen(name) == 0 || (strcmp(name, "admin") != 0 && !is_valid_username(name)))
     {
-        send_to_client(cli, "\033[1;31m[SERVER] Invalid username.\033[0m\n");
+        send_to_client(cli, "\033[1;31m[SERVER] Invalid username. Allowed: 2-28 chars (alphanumeric, _, -).\033[0m\n");
         ratelimit_release_ip_connection(cli->ip);
         close(cli->sockfd);
         free(cli);
@@ -472,7 +510,15 @@ void *handle_client(void *arg)
     fflush(stdout);
     strncpy(cli->party_code, "public", PARTY_CODE_LEN);
 
-    add_client(cli);
+    if (!add_client(cli))
+    {
+        send_to_client(cli, "\033[1;31m[SERVER] Server is full.\033[0m\n");
+        ratelimit_release_ip_connection(cli->ip);
+        close(cli->sockfd);
+        free(cli);
+        pthread_detach(pthread_self());
+        return NULL;
+    }
 
     char join_msg[128];
     snprintf(join_msg, sizeof(join_msg), "\033[1;32m[JOIN] %s has entered the chat.\033[0m\n", cli->username);
@@ -553,6 +599,13 @@ void *handle_client(void *arg)
         }
         else
         {
+            for (size_t i = 0; buffer[i]; i++)
+            {
+                if (buffer[i] == '\r' || buffer[i] == '\n')
+                {
+                    buffer[i] = ' ';
+                }
+            }
             char msg[sizeof(buffer) + 512];
             snprintf(msg, sizeof(msg), "%s[%s]:%s %s\n",
                      cli->color,
@@ -622,6 +675,7 @@ int main()
     printf("Server started on port %d\n", PORT);
     log_server_start(PORT);
     load_banlist();
+    load_motd();
     server_start_time = time(NULL);
     init_vanish_module();
     pthread_t vanish_thread;
@@ -657,6 +711,13 @@ int main()
         }
 
         client_t *cli = (client_t *)malloc(sizeof(client_t));
+        if (!cli)
+        {
+            ratelimit_release_ip_connection(cli_ip);
+            close(new_sock);
+            continue;
+        }
+
         memset(cli, 0, sizeof(client_t));
         cli->active = 1;
         cli->sockfd = new_sock;
@@ -668,7 +729,13 @@ int main()
         strncpy(cli->party_code, "public", PARTY_CODE_LEN);
 
         pthread_t tid;
-        pthread_create(&tid, NULL, handle_client, (void *)cli);
+        if (pthread_create(&tid, NULL, handle_client, (void *)cli) != 0)
+        {
+            ratelimit_release_ip_connection(cli_ip);
+            close(new_sock);
+            free(cli);
+            continue;
+        }
     }
 
     return 0;
