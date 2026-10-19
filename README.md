@@ -1,4 +1,5 @@
 # Kukupu Chat
+
 ### Production-Grade Concurrent Terminal Chat Ecosystem in Pure C
 
 [![Language](https://img.shields.io/badge/Language-C11-blue.svg)](https://en.cppreference.com/w/c)
