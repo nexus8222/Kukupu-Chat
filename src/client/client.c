@@ -1,14 +1,10 @@
 // client.c
+#include "compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
-#include <unistd.h>
 #include <pthread.h>
-#include <arpa/inet.h>
 #include <signal.h>
-#include <termios.h>
-#include <sys/select.h>
 #include <time.h>
 #include "common.h"
 #include "emoji.h"
@@ -28,9 +24,8 @@ static int input_len = 0;
 static int cursor_pos = 0;
 static char current_suggestion[128] = {0};
 
-static struct termios orig_termios;
 static volatile sig_atomic_t flag = 0;
-static int sockfd = 0;
+static socket_t sockfd = 0;
 static char username[32];
 
 static char history[HISTORY_MAX][INPUT_BUFFER];
@@ -128,17 +123,12 @@ static void catch_ctrl_c_and_exit(int sig)
 
 static void disable_raw_mode(void)
 {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+    platform_disable_raw_mode();
 }
 
 static void enable_raw_mode(void)
 {
-    tcgetattr(STDIN_FILENO, &orig_termios);
-    atexit(disable_raw_mode);
-
-    struct termios raw = orig_termios;
-    raw.c_lflag &= ~(ICANON | ECHO);
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    platform_enable_raw_mode();
 }
 
 static void handle_received_line(char *line)
@@ -478,37 +468,27 @@ static void *file_ticker_thread(void *arg)
 
 static void chat_loop(void)
 {
-    fd_set readfds;
     unsigned char ch;
     time_t last_typing_sent = 0;
 
     while (!flag)
     {
-        FD_ZERO(&readfds);
-        FD_SET(STDIN_FILENO, &readfds);
-        struct timeval tv;
-        tv.tv_sec = 0;
-        tv.tv_usec = 50000;
-
-        int sel = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
-        if (sel <= 0)
+        if (!platform_wait_input(50))
             continue;
 
-        if (FD_ISSET(STDIN_FILENO, &readfds))
-        {
-            if (read(STDIN_FILENO, &ch, 1) <= 0)
-                continue;
+        if (platform_read_char(&ch) <= 0)
+            continue;
 
-            // Handle Escape sequences (Arrows, PageUp, PageDown)
-            if (ch == 27)
+        // Handle Escape sequences (Arrows, PageUp, PageDown)
+        if (ch == 27)
+        {
+            unsigned char seq1 = 0, seq2 = 0, seq3 = 0;
+            if (platform_read_char(&seq1) > 0)
             {
-                unsigned char seq1 = 0, seq2 = 0, seq3 = 0;
-                if (read(STDIN_FILENO, &seq1, 1) > 0)
+                if (seq1 == '[')
                 {
-                    if (seq1 == '[')
+                    if (platform_read_char(&seq2) > 0)
                     {
-                        if (read(STDIN_FILENO, &seq2, 1) > 0)
-                        {
                             if (seq2 == 'A') // Up Arrow
                             {
                                 if (input_len == 0)
@@ -582,7 +562,7 @@ static void chat_loop(void)
                             }
                             else if (seq2 == '5') // PageUp (seq: [5~)
                             {
-                                if (read(STDIN_FILENO, &seq3, 1) > 0 && seq3 == '~')
+                                if (platform_read_char(&seq3) > 0 && seq3 == '~')
                                 {
                                     ui_scroll_up(10);
                                     ui_render(input, cursor_pos, current_suggestion);
@@ -591,7 +571,7 @@ static void chat_loop(void)
                             }
                             else if (seq2 == '6') // PageDown (seq: [6~)
                             {
-                                if (read(STDIN_FILENO, &seq3, 1) > 0 && seq3 == '~')
+                                if (platform_read_char(&seq3) > 0 && seq3 == '~')
                                 {
                                     ui_scroll_down(10);
                                     ui_render(input, cursor_pos, current_suggestion);
@@ -600,7 +580,7 @@ static void chat_loop(void)
                             }
                             else if (seq2 == '3') // Delete (seq: [3~)
                             {
-                                if (read(STDIN_FILENO, &seq3, 1) > 0 && seq3 == '~')
+                                if (platform_read_char(&seq3) > 0 && seq3 == '~')
                                 {
                                     if (cursor_pos < input_len)
                                     {
@@ -938,7 +918,6 @@ static void chat_loop(void)
             }
         }
     }
-}
 
 static int client_recv_line(int s, char *buf, size_t max_len)
 {
@@ -957,34 +936,130 @@ static int client_recv_line(int s, char *buf, size_t max_len)
 
 int main(int argc, char **argv)
 {
-    if (argc != 2)
+    if (net_init() != 0)
     {
-        printf("Usage: %s <server_ip>\n", argv[0]);
+        fprintf(stderr, "Network initialization failed\n");
         return EXIT_FAILURE;
     }
+    atexit(net_cleanup);
 
-    char *ip = argv[1];
-    int port = 9001;
+    char host[256] = "";
+    char port_str[16] = "9001";
+
+    if (argc < 2)
+    {
+        printf("\n============================================================\n");
+        printf("   KUKUPU CHAT - CLIENT CONNECTION SETUP\n");
+        printf("============================================================\n");
+        printf("Enter Server Host or IP (default: 127.0.0.1): ");
+        fflush(stdout);
+        char input_line[256];
+        if (fgets(input_line, sizeof(input_line), stdin) == NULL)
+        {
+            return EXIT_FAILURE;
+        }
+        str_trim_lf(input_line, sizeof(input_line));
+        if (strlen(input_line) == 0)
+        {
+            strcpy(input_line, "127.0.0.1");
+        }
+
+        char *colon = strrchr(input_line, ':');
+        if (colon)
+        {
+            size_t hlen = (size_t)(colon - input_line);
+            if (hlen >= sizeof(host)) hlen = sizeof(host) - 1;
+            strncpy(host, input_line, hlen);
+            host[hlen] = '\0';
+            strncpy(port_str, colon + 1, sizeof(port_str) - 1);
+            port_str[sizeof(port_str) - 1] = '\0';
+        }
+        else
+        {
+            strncpy(host, input_line, sizeof(host) - 1);
+            host[sizeof(host) - 1] = '\0';
+            printf("Enter Server Port (default: 9001): ");
+            fflush(stdout);
+            char port_line[32];
+            if (fgets(port_line, sizeof(port_line), stdin) != NULL)
+            {
+                str_trim_lf(port_line, sizeof(port_line));
+                if (strlen(port_line) > 0)
+                {
+                    strncpy(port_str, port_line, sizeof(port_str) - 1);
+                    port_str[sizeof(port_str) - 1] = '\0';
+                }
+            }
+        }
+    }
+    else
+    {
+        char *colon = strrchr(argv[1], ':');
+        if (colon)
+        {
+            size_t hlen = (size_t)(colon - argv[1]);
+            if (hlen >= sizeof(host)) hlen = sizeof(host) - 1;
+            strncpy(host, argv[1], hlen);
+            host[hlen] = '\0';
+            strncpy(port_str, colon + 1, sizeof(port_str) - 1);
+            port_str[sizeof(port_str) - 1] = '\0';
+        }
+        else
+        {
+            strncpy(host, argv[1], sizeof(host) - 1);
+            host[sizeof(host) - 1] = '\0';
+            if (argc == 3)
+            {
+                strncpy(port_str, argv[2], sizeof(port_str) - 1);
+                port_str[sizeof(port_str) - 1] = '\0';
+            }
+        }
+    }
 
     signal(SIGINT, catch_ctrl_c_and_exit);
+#ifdef SIGPIPE
     signal(SIGPIPE, SIG_IGN);
+#endif
 
-    struct sockaddr_in server_addr;
+    struct addrinfo hints, *res = NULL, *rp = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
 
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0)
+    if (getaddrinfo(host, port_str, &hints, &res) != 0)
     {
-        perror("Socket error");
+        fprintf(stderr, "Could not resolve server address: %s\n", host);
         return EXIT_FAILURE;
     }
 
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip, &server_addr.sin_addr);
-
-    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    int connected = 0;
+    for (rp = res; rp != NULL; rp = rp->ai_next)
     {
-        perror("Connect error");
+        sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (!IS_VALID_SOCKET(sockfd))
+            continue;
+
+        if (connect(sockfd, rp->ai_addr, (socklen_t)rp->ai_addrlen) == 0)
+        {
+            connected = 1;
+            break;
+        }
+
+        close(sockfd);
+        sockfd = 0;
+    }
+    freeaddrinfo(res);
+
+    if (!connected)
+    {
+        fprintf(stderr, "\n[ERROR] Failed to connect to server at %s:%s\n", host, port_str);
+        fprintf(stderr, "  -> Verify that the Kukupu server is running on that machine.\n");
+        fprintf(stderr, "  -> If using a tunnel (e.g. Pinggy/Ngrok), ensure the tunnel is active.\n\n");
+#ifdef _WIN32
+        printf("Press Enter to exit...");
+        fflush(stdout);
+        getchar();
+#endif
         return EXIT_FAILURE;
     }
 

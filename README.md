@@ -3,29 +3,49 @@
 ### Production-Grade Concurrent Terminal Chat Ecosystem in Pure C
 
 [![Language](https://img.shields.io/badge/Language-C11-blue.svg)](https://en.cppreference.com/w/c)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20(Multi--OS)-brightgreen.svg)]()
 [![Security](https://img.shields.io/badge/Security-OpenSSL%203.0-green.svg)](https://www.openssl.org/)
 [![Protocol](https://img.shields.io/badge/Cryptography-Signal%20Double%20Ratchet-blueviolet.svg)](https://signal.org/docs/specifications/doubleratchet/)
 [![Interface](https://img.shields.io/badge/Interface-Full--Screen%20TUI-cyan.svg)]()
 [![Build](https://img.shields.io/badge/Build-Passing%20(0%20warnings)-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)]()
 
-A high-performance, multithreaded terminal chat server and client written in pure C using POSIX sockets, `pthread` concurrency, and OpenSSL 3.0. Features a **full-screen terminal chat interface (TUI)** with zero-flicker double buffering and split-pane layout, **Signal-style Double Ratchet End-to-End Encryption (E2EE)**, **in-band chunked file streaming with SHA-256 integrity verification**, **Token Bucket anti-spam rate limiting**, **PBKDF2-HMAC-SHA256 administrative authentication**, **ephemeral vanishing messages**, **multi-room parties**, and **raw-mode terminal controls** (history recall, cursor editing, Tab autocompletion, PageUp/PageDown scrollback, and live typing indicators).
+A high-performance, multithreaded terminal chat server and client written in pure C supporting both **Linux and Windows**. Features a **full-screen terminal chat interface (TUI)** with zero-flicker double buffering, **Signal-style Double Ratchet End-to-End Encryption (E2EE)**, **in-band chunked file streaming with SHA-256 integrity verification**, **Token Bucket anti-spam rate limiting**, **PBKDF2-HMAC-SHA256 administrative authentication**, **ephemeral vanishing messages**, **multi-room parties**, and **raw-mode terminal controls** (history recall, cursor editing, Tab autocompletion, PageUp/PageDown scrollback, and live typing indicators).
 
 ---
 
 ## Table of Contents
+- [Pre-Built Standalone Binaries](#pre-built-standalone-binaries)
 - [Key Features](#key-features)
 - [Terminal User Interface (TUI) Layout](#terminal-user-interface-tui-layout)
 - [Architecture & Cryptographic Design](#architecture--cryptographic-design)
 - [Project Structure](#project-structure)
 - [Prerequisites & Dependencies](#prerequisites--dependencies)
 - [Build & Quick Start](#build--quick-start)
+- [Remote Tunneling (Play with Friends Worldwide)](#remote-tunneling-play-with-friends-worldwide)
 - [Docker Deployment](#docker-deployment)
 - [Command Reference](#command-reference)
 - [Keyboard Controls & Shortcuts](#keyboard-controls--shortcuts)
 - [Internal Wire Protocol](#internal-wire-protocol)
 - [Automated Verification Suite](#automated-verification-suite)
+- [Changelog](CHANGELOG.md)
 - [Developer & License](#developer--license)
+
+---
+
+## Pre-Built Standalone Binaries
+
+Pre-compiled, statically linked binaries are included directly in the [`release/`](release/) directory with zero external runtime dependencies needed:
+
+| Platform | Binary | Architecture | Dependencies | Description |
+|:---|:---|:---|:---|:---|
+| **Windows** | [`release/client.exe`](release/client.exe) | x86_64 PE32+ | None (Standalone static) | Full-screen TUI Client with Double Ratchet E2EE |
+| **Windows** | [`release/server.exe`](release/server.exe) | x86_64 PE32+ | None (Standalone static) | Multithreaded TCP Server with PBKDF2 DB |
+| **Linux** | [`release/client`](release/client) | x86_64 ELF | OpenSSL 3.0+ | Linux native interactive terminal client |
+| **Linux** | [`release/server`](release/server) | x86_64 ELF | OpenSSL 3.0+ | Linux native concurrent chat daemon |
+
+> [!TIP]
+> Windows users can simply double-click `client.exe` to launch interactive connection setup, or pass the server address on the command line (`client.exe <host> [port]`).
 
 ---
 
@@ -146,6 +166,11 @@ kukupu-chat/
 ├── docker-compose.yml      # Orchestration definition for single-command deploy
 ├── README.md               # Comprehensive architectural documentation & guides
 ├── checklist               # Development tracking roadmap
+├── release/                # Pre-built standalone binaries (Linux & Windows)
+│   ├── client              # Linux x86_64 ELF standalone client
+│   ├── client.exe          # Windows x86_64 PE32+ standalone client
+│   ├── server              # Linux x86_64 ELF standalone server
+│   └── server.exe          # Windows x86_64 PE32+ standalone server
 │
 ├── include/                # Header definitions & public APIs
 │   ├── admin.h             # Moderation control declarations
@@ -153,6 +178,7 @@ kukupu-chat/
 │   ├── client.h            # Client session & connection definitions
 │   ├── commands.h          # Command dispatch declarations
 │   ├── common.h            # Protocol constants, buffer limits & color palette
+│   ├── compat.h            # Multi-OS POSIX/Windows cross-platform abstraction layer
 │   ├── crypto_utils.h      # OpenSSL 3.0 X25519, HKDF, AES-256-GCM, PBKDF2 APIs
 │   ├── db.h                # PBKDF2 credential storage, offline inbox & key store
 │   ├── e2ee.h              # Signal Double Ratchet protocol declarations
@@ -208,27 +234,39 @@ kukupu-chat/
 
 ## Prerequisites & Dependencies
 
-- **Operating System**: Linux (Ubuntu 20.04+, Debian, Arch, Fedora) or POSIX-compliant environment.
-- **Compiler**: GCC 9.0+ or Clang 10.0+ with C11 support.
+- **Operating System**: Linux (Ubuntu 20.04+, Debian, Arch, Fedora) or Windows 10/11 (via standalone `.exe` or MinGW-w64).
+- **Compiler**: GCC 9.0+ or Clang 10.0+ with C11 support (or `x86_64-w64-mingw32-gcc` for Windows).
 - **Libraries**:
-  - `pthread` (POSIX Threads)
+  - `pthread` (POSIX Threads / winpthreads on Windows)
   - `libssl` & `libcrypto` (OpenSSL 3.0+)
+  - Winsock2 (`ws2_32`, `crypt32`) on Windows (standard OS libraries)
 
 ### Installing Dependencies on Ubuntu / Debian:
 ```bash
 sudo apt-get update
 sudo apt-get install -y build-essential libssl-dev
+
+# Optional: To build Windows binaries (.exe) from Linux
+sudo apt-get install -y mingw-w64
 ```
 
 ---
 
 ## Build & Quick Start
 
-### 1. Compile Everything
+### 1. Compile Everything (Linux)
 ```bash
 make clean && make
 ```
 *Compiles both `server` and `client` binaries with zero warnings under `-Wall -Wextra -pthread -O2`.*
+
+### Windows (.exe) Multi-OS Build
+Kukupu Chat features multi-OS architecture with a dedicated cross-platform layer ([`include/compat.h`](include/compat.h)). You can cross-compile native Windows `.exe` binaries directly from Linux using MinGW-w64:
+
+```bash
+make windows
+```
+*Outputs native `client.exe` and `server.exe` with full Winsock networking, Windows Console VT100 ANSI support, and Signal Double Ratchet E2EE.*
 
 ### 2. Start the Server Daemon
 ```bash
@@ -241,8 +279,14 @@ make clean && make
 Open a new terminal window for each client:
 
 ```bash
-# Launch interactive client
-./client 127.0.0.1
+# Launch interactive client (Linux)
+./client 127.0.0.1 9001
+
+# Launch on Windows
+client.exe 127.0.0.1 9001
+
+# Or run without arguments to trigger interactive server host/port prompt
+./client
 ```
 The interactive TUI landing page launches immediately:
 - Select **`[1] >> Quick Guest Login`** to join public chat instantly as a guest handle.
@@ -255,6 +299,33 @@ The interactive TUI landing page launches immediately:
 Enter your username: admin
 Enter Admin Password: admin123
 Enter Joining Alias: root_admin
+```
+
+---
+
+## Remote Tunneling (Play with Friends Worldwide)
+
+You can host the Kukupu server on your personal Linux machine and connect remote friends on Windows/Linux **without needing a VPS, Cloud VM, or spending any money**:
+
+### Method 1: Pinggy (Zero-Installation, 1 SSH Command)
+In a separate terminal on your server machine:
+```bash
+ssh -p 443 -R0:localhost:9001 tcp@a.pinggy.io
+```
+Pinggy immediately outputs an address like `tcp://tcp.pinggy.io:14892`.
+Your remote friends on Windows simply run:
+```cmd
+client.exe tcp.pinggy.io 14892
+```
+*(Or double-click `client.exe` and paste `tcp.pinggy.io` and `14892` when prompted!)*
+
+### Method 2: Ngrok TCP Tunnel
+```bash
+ngrok tcp 9001
+```
+Connect using the assigned forwarding address:
+```cmd
+client.exe 0.tcp.ngrok.io 15423
 ```
 
 ---

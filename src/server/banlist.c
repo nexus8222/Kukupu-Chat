@@ -1,9 +1,8 @@
+#include "compat.h"
 #include <stdio.h>
 #include <string.h>
-#include <arpa/inet.h> 
-#include <sys/stat.h>
-#include "banlist.h"
 #include "common.h"
+#include "banlist.h"
 #include "client.h" 
 #define BAN_FILE "banned.txt"
 

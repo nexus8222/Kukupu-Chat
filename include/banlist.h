@@ -3,7 +3,6 @@
 #define BANLIST_H
 
 #include "common.h"
-#include <netinet/in.h>
 void list_banned(client_t *cli);
 
 #define MAX_BANNED 100

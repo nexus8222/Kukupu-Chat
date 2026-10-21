@@ -1,10 +1,10 @@
 #include "db.h"
 #include "crypto_utils.h"
+#include "compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <sys/stat.h>
 #include <openssl/rand.h>
 
 static pthread_mutex_t db_lock = PTHREAD_MUTEX_INITIALIZER;

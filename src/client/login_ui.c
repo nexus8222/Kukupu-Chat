@@ -1,21 +1,17 @@
 #include "login_ui.h"
+#include "compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <termios.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
 #include <ctype.h>
 
-static struct termios orig_termios;
 static int raw_active = 0;
 
 static void disable_raw(void)
 {
     if (raw_active)
     {
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+        platform_disable_raw_mode();
         raw_active = 0;
         printf("\033[?25h"); // Show cursor
         fflush(stdout);
@@ -26,23 +22,20 @@ static void enable_raw(void)
 {
     if (!raw_active)
     {
-        tcgetattr(STDIN_FILENO, &orig_termios);
-        struct termios raw = orig_termios;
-        raw.c_lflag &= ~(ICANON | ECHO);
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+        platform_enable_raw_mode();
         raw_active = 1;
     }
 }
 
 static int read_key(void)
 {
-    char c = 0;
-    if (read(STDIN_FILENO, &c, 1) != 1) return -1;
+    unsigned char c = 0;
+    if (platform_read_char(&c) != 1) return -1;
     if (c == 27) // Escape sequence
     {
-        char seq[3];
-        if (read(STDIN_FILENO, &seq[0], 1) != 1) return 27; // Bare ESC
-        if (read(STDIN_FILENO, &seq[1], 1) != 1) return 27;
+        unsigned char seq[2] = {0, 0};
+        if (platform_read_char(&seq[0]) != 1) return 27; // Bare ESC
+        if (platform_read_char(&seq[1]) != 1) return 27;
 
         if (seq[0] == '[')
         {
@@ -53,10 +46,10 @@ static int read_key(void)
         }
         return 27;
     }
-    return (int)(unsigned char)c;
+    return (int)c;
 }
 
-static int socket_recv_line(int sockfd, char *buf, size_t max_len)
+static int socket_recv_line(socket_t sockfd, char *buf, size_t max_len)
 {
     size_t i = 0;
     while (i < max_len - 1)
@@ -599,7 +592,7 @@ static int dialog_registered_login(int sockfd, char *out_user, size_t ulen)
 // MAIN ENTRY: RUN LOGIN TUI
 // -------------------------------------------------------------
 
-int run_login_tui(int sockfd, char *out_username, size_t ulen, int *out_is_registered)
+int run_login_tui(socket_t sockfd, char *out_username, size_t ulen, int *out_is_registered)
 {
     if (!out_username || ulen == 0 || !out_is_registered) return -1;
 

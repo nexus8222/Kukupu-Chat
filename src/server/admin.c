@@ -3,16 +3,15 @@
 THIS PART CONTAINS ALL LOGICS 
 OF COMMANDS AVAILABLE TO ADMIN!
 */
+#include "compat.h"
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h> 
+#include "common.h"
 #include "admin.h"
 #include "client.h"
 #include "banlist.h"
 #include "mute.h"
 #include "utils.h"
-#include "common.h"
 
 extern client_t *clients[MAX_CLIENTS];
 

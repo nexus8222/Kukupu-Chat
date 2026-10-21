@@ -1,6 +1,13 @@
-CC = gcc
+CC ?= gcc
 CFLAGS = -Wall -Wextra -pthread -O2 -Iinclude
 LDFLAGS = -lssl -lcrypto
+
+# Auto-detect local OpenSSL paths if present
+LOCAL_INC = $(wildcard $(HOME)/.local/usr/include)
+ifneq ($(LOCAL_INC),)
+    CFLAGS += -I$(HOME)/.local/usr/include
+    LDFLAGS += -L$(HOME)/.local/usr/lib/x86_64-linux-gnu
+endif
 
 BUILD_DIR = build
 SRC_DIR = src
@@ -37,7 +44,7 @@ SRCS_CLIENT = $(SRC_DIR)/client/client.c \
               $(SRC_DIR)/client/file_transfer.c \
               $(SRCS_COMMON)
 
-# Object files
+# Linux Object files
 OBJS_SERVER = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SRCS_SERVER))
 OBJS_CLIENT = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SRCS_CLIENT))
 
@@ -45,7 +52,44 @@ TARGET_SERVER = server
 TARGET_CLIENT = client
 TARGET_TEST = test_e2e_full
 
-.PHONY: all clean test
+# Windows Cross-Compilation Settings (MinGW-w64)
+ifneq ($(wildcard $(HOME)/.local/bin/x86_64-w64-mingw32-gcc),)
+    CC_WIN ?= $(HOME)/.local/bin/x86_64-w64-mingw32-gcc
+else
+    CC_WIN ?= x86_64-w64-mingw32-gcc
+endif
+WIN_BUILD_DIR = $(BUILD_DIR)/win
+
+WIN_INC = -Iinclude
+WIN_LOCAL_INC = $(wildcard $(HOME)/.local/mingw64/mingw64/include)
+ifneq ($(WIN_LOCAL_INC),)
+    WIN_INC += -I$(HOME)/.local/mingw64/mingw64/include
+endif
+
+MINGW_SYS_INC = $(wildcard $(HOME)/.local/usr/x86_64-w64-mingw32/include)
+ifneq ($(MINGW_SYS_INC),)
+    WIN_INC += -I$(HOME)/.local/usr/x86_64-w64-mingw32/include
+endif
+
+WIN_CFLAGS = -Wall -Wextra -O2 $(WIN_INC) -pthread
+WIN_LDFLAGS = -static -lssl -lcrypto -lws2_32 -lmswsock -lcrypt32 -lssp -pthread
+WIN_LOCAL_LIB = $(wildcard $(HOME)/.local/mingw64/mingw64/lib)
+ifneq ($(WIN_LOCAL_LIB),)
+    WIN_LDFLAGS := -L$(HOME)/.local/mingw64/mingw64/lib $(WIN_LDFLAGS)
+endif
+
+MINGW_SYS_LIB = $(wildcard $(HOME)/.local/usr/x86_64-w64-mingw32/lib)
+ifneq ($(MINGW_SYS_LIB),)
+    WIN_LDFLAGS := -L$(HOME)/.local/usr/x86_64-w64-mingw32/lib $(WIN_LDFLAGS)
+endif
+
+TARGET_SERVER_WIN = server.exe
+TARGET_CLIENT_WIN = client.exe
+
+OBJS_SERVER_WIN = $(patsubst $(SRC_DIR)/%.c, $(WIN_BUILD_DIR)/%.o, $(SRCS_SERVER))
+OBJS_CLIENT_WIN = $(patsubst $(SRC_DIR)/%.c, $(WIN_BUILD_DIR)/%.o, $(SRCS_CLIENT))
+
+.PHONY: all clean test test-commands test-auth test-all windows
 
 all: $(TARGET_SERVER) $(TARGET_CLIENT)
 
@@ -58,6 +102,19 @@ $(TARGET_SERVER): $(OBJS_SERVER)
 
 $(TARGET_CLIENT): $(OBJS_CLIENT)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Windows targets (.exe)
+windows: $(TARGET_SERVER_WIN) $(TARGET_CLIENT_WIN)
+
+$(WIN_BUILD_DIR)/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC_WIN) $(WIN_CFLAGS) -c -o $@ $<
+
+$(TARGET_SERVER_WIN): $(OBJS_SERVER_WIN)
+	$(CC_WIN) $(WIN_CFLAGS) -o $@ $^ $(WIN_LDFLAGS)
+
+$(TARGET_CLIENT_WIN): $(OBJS_CLIENT_WIN)
+	$(CC_WIN) $(WIN_CFLAGS) -o $@ $^ $(WIN_LDFLAGS)
 
 test: $(TARGET_SERVER) $(TARGET_CLIENT) $(TARGET_TEST)
 	@killall -9 $(TARGET_SERVER) 2>/dev/null || true
@@ -80,4 +137,4 @@ $(TARGET_TEST): $(TESTS_DIR)/test_e2e_full.c $(BUILD_DIR)/common/crypto_utils.o 
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET_SERVER) $(TARGET_CLIENT) $(TARGET_TEST) *.o
+	rm -rf $(BUILD_DIR) $(TARGET_SERVER) $(TARGET_CLIENT) $(TARGET_TEST) $(TARGET_SERVER_WIN) $(TARGET_CLIENT_WIN) *.o

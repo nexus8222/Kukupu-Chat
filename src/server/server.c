@@ -1,10 +1,9 @@
 // server.c
+#include "compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <signal.h>
-#include <arpa/inet.h>
 #include <pthread.h>
 #include <time.h>
 #include "common.h"
@@ -43,7 +42,7 @@ void *vanish_cleaner_thread(void *arg)
     return NULL;
 }
 
-void party_broadcast_system(const char *msg, int except_sock)
+void party_broadcast_system(const char *msg, socket_t except_sock)
 {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < MAX_CLIENTS; ++i)
@@ -119,7 +118,7 @@ client_t *get_client_by_name(const char *name)
     return NULL;
 }
 
-void remove_client(int sockfd)
+void remove_client(socket_t sockfd)
 {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < MAX_CLIENTS; ++i)
@@ -834,18 +833,25 @@ void *handle_client(void *arg)
 
 int main()
 {
+    if (net_init() != 0)
+    {
+        fprintf(stderr, "Network initialization failed\n");
+        exit(1);
+    }
+    atexit(net_cleanup);
+
     ratelimit_init();
     db_init_admin("admin123");
 
-    int listener = socket(AF_INET, SOCK_STREAM, 0);
-    if (listener < 0)
+    socket_t listener = socket(AF_INET, SOCK_STREAM, 0);
+    if (!IS_VALID_SOCKET(listener))
     {
         perror("Socket failed");
         exit(1);
     }
 
     int opt = 1;
-    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
 
     struct sockaddr_in server_addr, cli_addr;
     socklen_t cli_len = sizeof(cli_addr);
@@ -854,7 +860,9 @@ int main()
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(PORT);
 
+#ifdef SIGPIPE
     signal(SIGPIPE, SIG_IGN);
+#endif
 
     if (bind(listener, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
     {
@@ -880,8 +888,8 @@ int main()
     
     while (1)
     {
-        int new_sock = accept(listener, (struct sockaddr *)&cli_addr, &cli_len);
-        if (new_sock < 0)
+        socket_t new_sock = accept(listener, (struct sockaddr *)&cli_addr, &cli_len);
+        if (!IS_VALID_SOCKET(new_sock))
         {
             perror("Accept failed");
             continue;

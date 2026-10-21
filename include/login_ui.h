@@ -1,6 +1,7 @@
 #ifndef LOGIN_UI_H
 #define LOGIN_UI_H
 
+#include "compat.h"
 #include <stddef.h>
 
 typedef enum {
@@ -12,6 +13,6 @@ typedef enum {
 
 // Runs the interactive landing TUI page with actionable dialogs
 // Returns 0 on success (with out_username and out_is_registered filled), or -1 on exit/error.
-int run_login_tui(int sockfd, char *out_username, size_t ulen, int *out_is_registered);
+int run_login_tui(socket_t sockfd, char *out_username, size_t ulen, int *out_is_registered);
 
 #endif // LOGIN_UI_H

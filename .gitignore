@@ -1,6 +1,8 @@
 # Binaries
 /server
 /client
+/server.exe
+/client.exe
 /test_e2e_full
 
 # Objects & Archives

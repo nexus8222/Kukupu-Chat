@@ -1,10 +1,9 @@
 #include "ui.h"
+#include "compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <pthread.h>
-#include <sys/ioctl.h>
 #include <signal.h>
 #include <ctype.h>
 
@@ -54,8 +53,61 @@ static int sidebar_user_count = 0;
 static int term_cols = 80;
 static int term_rows = 24;
 
+static int visual_str_len(const char *s)
+{
+    if (!s) return 0;
+    int len = 0;
+    int in_esc = 0;
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p)
+    {
+        if (*p == '\033')
+        {
+            in_esc = 1;
+            p++;
+        }
+        else if (in_esc)
+        {
+            if (*p == 'm' || *p == 'H' || *p == 'J' || *p == 'h' || *p == 'l')
+                in_esc = 0;
+            p++;
+        }
+        else
+        {
+            if ((*p & 0xC0) == 0x80)
+            {
+                // UTF-8 continuation byte, skip from width count
+            }
+            else if ((*p & 0xF8) == 0xF0)
+            {
+                len += 2; // Emoji takes 2 columns
+            }
+            else
+            {
+                len += 1;
+            }
+            p++;
+        }
+    }
+    return len;
+}
+
 static void update_term_size(void)
 {
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi))
+    {
+        term_cols = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+        // On Windows console, leave 1 row margin so rendering never triggers auto-scrolling jitter
+        term_rows = csbi.srWindow.Bottom - csbi.srWindow.Top;
+    }
+    else
+    {
+        term_cols = 80;
+        term_rows = 24;
+    }
+#else
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0)
     {
@@ -67,10 +119,12 @@ static void update_term_size(void)
         term_cols = 80;
         term_rows = 24;
     }
+#endif
     if (term_cols < 40) term_cols = 40;
     if (term_rows < 10) term_rows = 10;
 }
 
+#ifndef _WIN32
 static void sigwinch_handler(int sig)
 {
     (void)sig;
@@ -78,6 +132,7 @@ static void sigwinch_handler(int sig)
     update_term_size();
     pthread_mutex_unlock(&ui_lock);
 }
+#endif
 
 void ui_init(const char *username)
 {
@@ -91,14 +146,16 @@ void ui_init(const char *username)
 
     update_term_size();
 
-    // Enter alternate screen buffer, clear screen, hide cursor during setup
-    ssize_t w = write(STDOUT_FILENO, "\033[?1049h\033[2J\033[H\033[?25h", 18);
+    // Enter alternate screen buffer, disable line wrap, clear screen, hide cursor during setup
+    ssize_t w = write(STDOUT_FILENO, "\033[?1049h\033[?7l\033[2J\033[H\033[?25l", 23);
     (void)w;
 
+#ifndef _WIN32
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = sigwinch_handler;
     sigaction(SIGWINCH, &sa, NULL);
+#endif
 
     // Initial system banner
     messages[0].type = MSG_SYSTEM;
@@ -124,8 +181,8 @@ void ui_init(const char *username)
 void ui_shutdown(void)
 {
     pthread_mutex_lock(&ui_lock);
-    // Leave alternate screen buffer, restore cursor, clear attributes
-    ssize_t w = write(STDOUT_FILENO, "\033[0m\033[?1049l\033[?25h\n", 18);
+    // Restore line wrap, leave alternate screen buffer, restore cursor, clear attributes
+    ssize_t w = write(STDOUT_FILENO, "\033[0m\033[?7h\033[?1049l\033[?25h\n", 22);
     (void)w;
     pthread_mutex_unlock(&ui_lock);
 }
@@ -569,8 +626,8 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
     static char frame[FRAME_BUF_SIZE];
     int fidx = 0;
 
-    // Reset cursor to top-left
-    fidx += snprintf(frame + fidx, FRAME_BUF_SIZE - fidx, "\033[H");
+    // Hide cursor during frame draw and reset cursor to top-left
+    fidx += snprintf(frame + fidx, FRAME_BUF_SIZE - fidx, "\033[?25l\033[H");
 
     // -------------------------------------------------------------
     // ROW 1: HEADER BAR
@@ -585,7 +642,7 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
     else
         snprintf(head_right, sizeof(head_right), "── User: %s [GUEST] ──┐", my_username);
 
-    int visual_header_len = (int)(strlen(head_left) + strlen(head_mid) + strlen(head_right));
+    int visual_header_len = visual_str_len(head_left) + visual_str_len(head_mid) + visual_str_len(head_right);
     int head_dash = cols - visual_header_len;
     if (head_dash < 0) head_dash = 0;
 
@@ -660,18 +717,8 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
                 snprintf(side_text, sizeof(side_text), "\033[2mMode: Public\033[0m");
             }
 
-            // Calculate visible plain length for sidebar text
-            int side_plain_len = 0;
-            const char *sp = side_text;
-            int in_esc = 0;
-            while (*sp)
-            {
-                if (*sp == '\033') in_esc = 1;
-                else if (in_esc && *sp == 'm') in_esc = 0;
-                else if (!in_esc) side_plain_len++;
-                sp++;
-            }
-
+            // Calculate visible length for sidebar text
+            int side_plain_len = visual_str_len(side_text);
             int side_pad = sidebar_width - 2 - side_plain_len;
             if (side_pad < 0) side_pad = 0;
 
@@ -730,7 +777,7 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
         snprintf(stat_content, sizeof(stat_content), "Online • Room #%s • Signal Double Ratchet Ready", current_room);
     }
 
-    int stat_len = (int)strlen(stat_content);
+    int stat_len = visual_str_len(stat_content);
     int stat_dash = cols - stat_len - 14;
     if (stat_dash < 0) stat_dash = 0;
 
@@ -747,7 +794,7 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
     // -------------------------------------------------------------
     char in_head[64];
     snprintf(in_head, sizeof(in_head), "╭─ Message #%s ", current_room);
-    int in_head_len = (int)strlen(in_head);
+    int in_head_len = visual_str_len(in_head);
     int in_dash = cols - in_head_len - 1;
     if (in_dash < 0) in_dash = 0;
 
@@ -763,7 +810,7 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
     // ROW (rows - 1): INPUT TEXT LINE
     // -------------------------------------------------------------
     const char *in_text = input_buf ? input_buf : "";
-    int in_len = (int)strlen(in_text);
+    int in_len = visual_str_len(in_text);
     int in_space_pad = cols - in_len - 5;
     if (in_space_pad < 0) in_space_pad = 0;
 
@@ -779,7 +826,7 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
     // ROW (rows): INPUT BOX BOTTOM & HOTKEY GUIDE
     // -------------------------------------------------------------
     char in_foot[128] = "╰─ [Tab] Autocomplete  •  [PgUp/PgDn] Scroll  •  [/exit] Quit ";
-    int in_foot_len = (int)strlen(in_foot);
+    int in_foot_len = visual_str_len(in_foot);
     int in_foot_dash = cols - in_foot_len - 1;
     if (in_foot_dash < 0) in_foot_dash = 0;
 

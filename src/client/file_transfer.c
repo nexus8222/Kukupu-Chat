@@ -1,10 +1,8 @@
 #include "file_transfer.h"
+#include "compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <libgen.h>
 #include <time.h>
 
 static file_transfer_t transfers[MAX_ACTIVE_TRANSFERS];
@@ -123,7 +121,7 @@ int file_transfer_start_send(const char *peer_username, const char *filepath, in
     t->is_sender = 1;
     strncpy(t->peer, peer_username, USERNAME_LEN - 1);
     strncpy(t->filepath, filepath, sizeof(t->filepath) - 1);
-    char *base = basename((char *)filepath);
+    const char *base = cross_basename(filepath);
     strncpy(t->filename, base, sizeof(t->filename) - 1);
     t->filesize = (size_t)size;
     t->total_chunks = (int)((t->filesize + FILE_CHUNK_SIZE - 1) / FILE_CHUNK_SIZE);

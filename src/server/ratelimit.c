@@ -1,8 +1,8 @@
 #include "ratelimit.h"
+#include "compat.h"
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
-#include <sys/socket.h>
 
 static pthread_mutex_t ip_lock = PTHREAD_MUTEX_INITIALIZER;
 static ip_track_t ip_table[MAX_IP_TRACK];

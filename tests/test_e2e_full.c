@@ -1,11 +1,8 @@
+#include "compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
 #include <assert.h>
-#include <sys/stat.h>
 #include "crypto_utils.h"
 #include "e2ee.h"
 #include "file_transfer.h"
@@ -64,6 +61,9 @@ static int recv_line(int s, char *buf, size_t max_len, int timeout_sec)
 
 int main()
 {
+    net_init();
+    atexit(net_cleanup);
+
     printf("\n============================================================\n");
     printf("   KUKUPU CHAT - FULL END-TO-END AUTOMATED TEST SUITE\n");
     printf("============================================================\n\n");

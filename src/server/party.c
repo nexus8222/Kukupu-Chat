@@ -96,7 +96,7 @@ void list_active_parties(client_t *cli)
         send_to_client(cli, "\033[1mActive Parties:\033[0m\n\n%s", parties);
 }
 
-void party_broadcast(const char *msg, const char *party_code, int except_sock) {
+void party_broadcast(const char *msg, const char *party_code, socket_t except_sock) {
     if (!msg || !party_code) return;
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < MAX_CLIENTS; ++i) {

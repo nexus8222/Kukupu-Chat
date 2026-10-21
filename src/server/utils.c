@@ -1,8 +1,8 @@
 #include "utils.h"
+#include "compat.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include <pthread.h>
 
 extern client_t *clients[MAX_CLIENTS];
@@ -10,7 +10,7 @@ extern pthread_mutex_t clients_mutex;
 
 void send_to_client(client_t *cli, const char *fmt, ...)
 {
-    if (!cli || cli->sockfd < 0 || !fmt) return;
+    if (!cli || !IS_VALID_SOCKET(cli->sockfd) || !fmt) return;
     char buffer[2048];
     va_list args;
     va_start(args, fmt);

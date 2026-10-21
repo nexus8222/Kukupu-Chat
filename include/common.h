@@ -3,10 +3,9 @@
 #ifndef COMMON_H
 #define COMMON_H
 #define PARTY_CODE_LEN 64
-#include <strings.h>
+#include "compat.h"
 
 #include <time.h>
-#include <netinet/in.h>  // for struct sockaddr_in
 #include <pthread.h>
 #define ANSI_COLOR_MAX 16
 #define USERNAME_LEN 32
@@ -18,7 +17,7 @@
 
 
 typedef struct client {
-    int sockfd;
+    socket_t sockfd;
     char username[USERNAME_LEN];
     
     int active; 
