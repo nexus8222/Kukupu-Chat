@@ -107,6 +107,14 @@ Pre-compiled, statically linked binaries are included directly in the [`release/
 
 ## Terminal User Interface (TUI) Layout
 
+<p align="center">
+  <img src="docs/images/tui_main_chat.png" alt="Kukupu Chat Interactive TUI Main View" width="750" />
+</p>
+<p align="center">
+  <img src="docs/images/tui_account_portal.png" alt="Account Management Portal" width="370" />
+  <img src="docs/images/tui_party_portal.png" alt="Party Portal and Moderation" width="370" />
+</p>
+
 ```text
 ┌── [⚡ KUKUPU CHAT] ── Room: #0000 ── [E2EE: ON] ─────────────── Alice [REG] ──┐
 │ ╦╔═ ╦ ╦ ╦╔═ ╦ ╦ ╔═╗ ╦ ╦   ╔═╗ ╦ ╦ ╔═╗ ╔╦╗             [ 👤 Account ]        │

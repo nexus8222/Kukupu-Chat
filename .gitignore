@@ -26,6 +26,10 @@ downloads/
 # Test artifacts
 test_payload.bin
 server_test.log
+capture_screens
+*.raw
+__pycache__/
+*.pyc
 
 # IDE & Editor files
 .vscode/
