@@ -108,26 +108,47 @@ Pre-compiled, statically linked binaries are included directly in the [`release/
 ## Terminal User Interface (TUI) Layout
 
 ```text
-┌── [KUKUPU CHAT] ── Room: #0000 ── [E2EE: ACTIVE] ── User: @alice ──────────────────┐
-│ [14:20] --- [SYS] Connected to Kukupu Chat.                     │ [MEMBERS (2)]    │
-│ [14:20] --- [SYS] Signal Double Ratchet E2EE active.            │ * alice (you)    │
-│ [14:21] <bob> Hey Alice, how is the project going?              │ * bob            │
-│ [14:21] [YOU] > Working on the terminal user interface!         │ ─────────────────│
-│ [14:22] [E2EE:bob] > Double Ratchet forward secrecy is verified!│ [CHANNEL #0000]  │
-│ [14:22] [FILE:bob] Offer: 'report.pdf' (120 KB) -> Type /fileaccept 1000           │
-│                                                                 │ Mode: Public     │
-├─ [STATUS] Typing: bob is typing a message... ──────────────────────────────────────┤
-╭─ Message #0000 ────────────────────────────────────────────────────────────────────╮
+┌── [⚡ KUKUPU CHAT] ── Room: #0000 ── [E2EE: ON] ─────────────── Alice [REG] ──┐
+│ ╦╔═ ╦ ╦ ╦╔═ ╦ ╦ ╔═╗ ╦ ╦   ╔═╗ ╦ ╦ ╔═╗ ╔╦╗             [ 👤 Account ]        │
+│ ╠╩╗ ║ ║ ╠╩╗ ║ ║ ╠═╝ ║ ║   ║   ╠═╣ ╠═╣  ║              [ 🔔 Notifs (1) ]     │
+│ ╩ ╩ ╚═╝ ╩ ╩ ╚═╝ ╩   ╚═╝   ╚═╝ ╩ ╩ ╩ ╩  ╩              [ #0000 Room ]        │
+├──────────────────────────────────────────────────────────────┬──────────────────────┤
+│ [14:20] --- [SYS] Connected to Kukupu Chat.                  │ [MEMBERS (2)]        │
+│ [14:20] --- [SYS] Signal Double Ratchet E2EE active.         │ * alice (you)        │
+│ [14:21] <bob> Hey Alice, how is the project going?           │ * bob                │
+│ [14:21] [YOU] > Working on the interactive terminal UI!      │ ─────────────────────│
+│ [14:22] [E2EE:bob] > Double Ratchet forward secrecy active!  │ [CHANNELS]           │
+│ [14:22] [FILE:bob] Offer: 'report.pdf' (120 KB) -> In Notifs │ > # Public Lobby     │
+│                                                              │   # Party 1042       │
+│                                                              │ [+ Join/Create]      │
+│                                                              │ ─────────────────────│
+│                                                              │ [PERSONAL MESSAGES]  │
+│                                                              │ > @bob (1)           │
+├─ [STATUS] Online - Room #0000 - Double Ratchet Active ──────────────────────────────┤
+╭─ Message #0000 ────────────────────────────────────────────────────────── [ ☺ ] ─╮
 │ >                                                                                  │
-╰─ [Tab] Autocomplete  •  [PgUp/PgDn] Scroll  •  [/exit] Quit ───────────────────────╯
+╰─ [Tab] Autocomplete  •  [PgUp/PgDn] Scroll  •  [/help] Catalog ────────────────────╯
 ```
 
 ### UI Panes & Components:
-1. **Header Bar**: Displays application brand, current channel (`Room: #0000`), E2EE status badge, and username handle.
-2. **Main Viewport**: Formatted message log with timestamp tags (`[HH:MM]`), clean badges (`<bob>`, `[YOU]`, `[E2EE:bob]`, `--- [SYS] ---`, `[FILE:bob]`), and automatic word-wrapping.
-3. **Members Sidebar**: 22-column right panel displaying online user list, self indicator (`* user (you)`), and room modes. Automatically collapses on compact screens (< 80 columns).
-4. **Status / Typing Divider**: Dedicated status bar for peer typing indicators (`Typing: bob is typing...`) and active file transfer progress bars.
-5. **Pinned Input Container**: Clean rounded container (`╭───╮ │ > ... │ ╰───╯`) with full cursor navigation and autocomplete preview hints.
+1. **Cyberpunk Top Banner**: Compact 41-column gradient banner ("KUKUPU CHAT") pinned at the top without line-wrapping. Contains clickable `[ 👤 Account ]` and `[ 🔔 Notifs (%d) ]` portal buttons.
+2. **Main Message Viewport**: Formatted message log with timestamp tags (`[HH:MM]`), badges (`<bob>`, `[YOU]`, `[E2EE:bob]`, `--- [SYS] ---`, `[FILE:bob]`), and automatic word-wrapping. Static schema ensures `/clear` resets only the message viewport while borders and panels remain static. Sent messages render in the user's selected theme color.
+3. **Partitioned Sidebar**:
+   - `[MEMBERS (n)]`: Online peers. Clicking any member opens an invite dialog to initiate personal E2EE chat.
+   - `[CHANNELS]`: Public Lobby (`#0000`) and private party rooms. Clicking `[+ Join/Create]` opens the Party Portal with Join (Room Code input) and Create tabs (with Open vs Approval Required privacy modes).
+   - `[PERSONAL MESSAGES]`: Mutual contacts established upon accepting PM requests. Clicking a contact switches directly to an isolated 1:1 chat room (`@<user>`) where typing automatically routes Double Ratchet E2EE messages without requiring `/msg` commands.
+4. **Account Management Portal (`[ 👤 Account ]`)**:
+   - Immutable username and mutable profile display name (`[ ✎ Edit Name ]` sub-modal / `/setname`).
+   - Change Password sub-modal (`/changepwd`) with PBKDF2 hashing.
+   - 7 Theme Colors: Green, Cyan, Yellow, Magenta, Blue, Red, White.
+   - Log Out button (`/exit`).
+   - If Admin: interactive RBAC User Moderation panel with Kick, Ban, Mute (60s), and Unmute buttons.
+5. **Notifications Portal (`[ 🔔 Notifs (%d) ]`) & Floating Toasts**:
+   - Overlay toasts with system sound alerts (`platform_play_sound`) for incoming invites, transfer offers, and party requests.
+   - 1:1 notifications for mutual contact acceptance and private decline notices.
+6. **Typing Container with Smiling Glyph `[ ☺ ]`**:
+   - Clickable `[ ☺ ]` button opening a paginated 180-glyph emoji picker modal palette.
+7. **Native Mouse Support**: SGR 1006 extended mouse tracking mode enabling mouse clicking on buttons, members, channels, emojis, and scroll wheel viewport navigation.
 
 ---
 

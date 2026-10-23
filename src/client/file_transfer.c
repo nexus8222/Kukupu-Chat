@@ -89,6 +89,17 @@ static void print_progress(const char *filename, int current, int total)
     fflush(stdout);
 }
 
+static size_t calculate_chunk_size(size_t filesize)
+{
+    if (filesize == 0) return 1;
+    // Guarantee at least 6 chunks whenever possible for smooth streaming
+    size_t target_chunks = 6;
+    size_t csize = (filesize + target_chunks - 1) / target_chunks;
+    if (csize < 1) csize = 1;
+    if (csize > FILE_CHUNK_SIZE) csize = FILE_CHUNK_SIZE;
+    return csize;
+}
+
 int file_transfer_start_send(const char *peer_username, const char *filepath, int sockfd)
 {
     if (!peer_username || !filepath || sockfd < 0) return -1;
@@ -126,7 +137,8 @@ int file_transfer_start_send(const char *peer_username, const char *filepath, in
     const char *base = cross_basename(filepath);
     strncpy(t->filename, base, sizeof(t->filename) - 1);
     t->filesize = (size_t)size;
-    t->total_chunks = (int)((t->filesize + FILE_CHUNK_SIZE - 1) / FILE_CHUNK_SIZE);
+    t->chunk_size = calculate_chunk_size(t->filesize);
+    t->total_chunks = (int)((t->filesize + t->chunk_size - 1) / t->chunk_size);
     t->current_chunk = 0;
     t->bytes_transferred = 0;
     t->state = TRANSFER_PENDING;
@@ -197,7 +209,8 @@ int file_transfer_handle_request(int id, const char *from, const char *filename,
     t->filename[sizeof(t->filename) - 1] = '\0';
     snprintf(t->filepath, sizeof(t->filepath), "downloads/%s", base);
     t->filesize = filesize;
-    t->total_chunks = (int)((filesize + FILE_CHUNK_SIZE - 1) / FILE_CHUNK_SIZE);
+    t->chunk_size = calculate_chunk_size(filesize);
+    t->total_chunks = (int)((filesize + t->chunk_size - 1) / t->chunk_size);
     t->current_chunk = 0;
     t->bytes_transferred = 0;
     strncpy(t->expected_sha256, sha256, SHA256_HEX_LEN - 1);
@@ -328,8 +341,9 @@ void file_transfer_sender_tick(int sockfd)
         file_transfer_t *t = &transfers[i];
         if (t->state == TRANSFER_ACTIVE && t->is_sender && t->fp)
         {
+            size_t to_read = (t->chunk_size > 0 && t->chunk_size <= FILE_CHUNK_SIZE) ? t->chunk_size : FILE_CHUNK_SIZE;
             unsigned char chunk[FILE_CHUNK_SIZE];
-            size_t bytes = fread(chunk, 1, sizeof(chunk), t->fp);
+            size_t bytes = fread(chunk, 1, to_read, t->fp);
             if (bytes > 0)
             {
                 char b64[FILE_CHUNK_SIZE * 3 + 256];
@@ -397,6 +411,8 @@ int file_transfer_receive_chunk(int id, int chunk_seq, int total_chunks, const c
     if (t->bytes_transferred + raw_len > t->filesize + FILE_CHUNK_SIZE)
         return -1;
 
+    size_t csize = (t->chunk_size > 0) ? t->chunk_size : FILE_CHUNK_SIZE;
+
     if (t->is_encrypted && raw_len > (AES_IV_LEN + AES_TAG_LEN))
     {
         unsigned char iv[AES_IV_LEN];
@@ -410,20 +426,20 @@ int file_transfer_receive_chunk(int id, int chunk_seq, int total_chunks, const c
         int pt_len = aes_gcm_decrypt(t->e2ee_key, iv, NULL, 0, ct, ct_len, tag, pt);
         if (pt_len > 0)
         {
-            fseek(t->fp, (long)chunk_seq * FILE_CHUNK_SIZE, SEEK_SET);
+            fseek(t->fp, (long)chunk_seq * (long)csize, SEEK_SET);
             fwrite(pt, 1, (size_t)pt_len, t->fp);
             t->bytes_transferred += (size_t)pt_len;
         }
         else
         {
-            fseek(t->fp, (long)chunk_seq * FILE_CHUNK_SIZE, SEEK_SET);
+            fseek(t->fp, (long)chunk_seq * (long)csize, SEEK_SET);
             fwrite(raw, 1, raw_len, t->fp);
             t->bytes_transferred += raw_len;
         }
     }
     else
     {
-        fseek(t->fp, (long)chunk_seq * FILE_CHUNK_SIZE, SEEK_SET);
+        fseek(t->fp, (long)chunk_seq * (long)csize, SEEK_SET);
         fwrite(raw, 1, raw_len, t->fp);
         t->bytes_transferred += raw_len;
     }

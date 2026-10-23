@@ -84,6 +84,8 @@ int handle_command(const char *cmdline, client_t *cli)
                        "/guess <number>        Guess the number\n"
 
                        "\033[1m[Customization]\033[0m\n"
+                       " /setname <name>      - Set mutable profile display name\n"
+                       " /changepwd <newpwd>  - Change account PBKDF2 password\n"
                        " /setcolor <color>    - Set your username color\n"
                        " /colorlist           - List available colors\n\n"
 
@@ -91,7 +93,10 @@ int handle_command(const char *cmdline, client_t *cli)
                        " /createparty [code]  - Create a new party\n"
                        " /joinparty <code>    - Join a party by code\n"
                        " /party               - Show current party\n"
-                       " /leaveparty          - Leave current party\n\n"
+                       " /leaveparty          - Leave current party\n"
+                       " /partykick <user>    - (Party Admin) Kick user from party\n"
+                       " /partypromote <user> - (Party Admin) Promote user to party admin\n"
+                       " /partyinvite <user>  - (Party Admin) Invite user to party\n\n"
 
                        "%s",
                        cli->is_admin ? "\033[1m[Admin Tools]\033[0m\n"
@@ -583,7 +588,7 @@ int handle_command(const char *cmdline, client_t *cli)
         {
             send_to_client(cli, "\033[1;31m[SERVER] Party already exists.\033[0m\n");
         }
-        else if (create_party(partycode))
+        else if (create_party_with_owner(partycode, cli->username, 0))
         {
             strncpy(cli->party_code, partycode, PARTY_CODE_LEN - 1);
             cli->party_code[PARTY_CODE_LEN - 1] = '\0';
@@ -674,6 +679,153 @@ int handle_command(const char *cmdline, client_t *cli)
             send_to_client(cli, "[SERVER] Failed to find your party.\n");
         }
 
+        return 1;
+    }
+
+    if (strcmp(command, "setname") == 0)
+    {
+        if (arg1[0] == '\0')
+        {
+            send_to_client(cli, "[USAGE] /setname <display_name>\n");
+            return 1;
+        }
+        pthread_mutex_lock(&clients_mutex);
+        strncpy(cli->profile_name, arg1, sizeof(cli->profile_name) - 1);
+        cli->profile_name[sizeof(cli->profile_name) - 1] = '\0';
+        pthread_mutex_unlock(&clients_mutex);
+        send_to_client(cli, "\033[1;32m[SERVER] Profile display name updated to '%s'.\033[0m\n", cli->profile_name);
+        return 1;
+    }
+
+    if (strcmp(command, "changepwd") == 0)
+    {
+        if (arg1[0] == '\0' || strlen(arg1) < 6)
+        {
+            send_to_client(cli, "[USAGE] /changepwd <new_password_min_6_chars>\n");
+            return 1;
+        }
+        int ok = 0;
+        if (cli->is_admin) ok = db_set_admin_password(arg1);
+        else if (cli->is_registered) ok = db_update_user_password(cli->username, arg1);
+        if (ok)
+            send_to_client(cli, "\033[1;32m[SERVER] Password successfully updated with PBKDF2 hash.\033[0m\n");
+        else
+            send_to_client(cli, "\033[1;31m[SERVER] Failed to update password (must be registered, min 6 chars).\033[0m\n");
+        return 1;
+    }
+
+    if (strcmp(command, "partykick") == 0)
+    {
+        if (arg1[0] == '\0')
+        {
+            send_to_client(cli, "[USAGE] /partykick <username>\n");
+            return 1;
+        }
+        if (strlen(cli->party_code) == 0 || strcmp(cli->party_code, "public") == 0)
+        {
+            send_to_client(cli, "[SERVER] You are not in a private party.\n");
+            return 1;
+        }
+        if (!party_is_admin(cli->party_code, cli->username) && !cli->is_admin)
+        {
+            send_to_client(cli, "\033[1;31m[ERROR] Only party admins can kick members from this party.\033[0m\n");
+            return 1;
+        }
+        pthread_mutex_lock(&clients_mutex);
+        client_t *target = NULL;
+        for (int i = 0; i < MAX_CLIENTS; ++i)
+        {
+            if (clients[i] && clients[i]->active && strcmp(clients[i]->username, arg1) == 0 &&
+                strcmp(clients[i]->party_code, cli->party_code) == 0)
+            {
+                target = clients[i];
+                break;
+            }
+        }
+        if (target)
+        {
+            strcpy(target->party_code, "public");
+            send_to_client(target, "\033[1;31m[PARTY] You were removed from party '%s' by party admin.\033[0m\n", cli->party_code);
+            send_to_client(cli, "\033[1;32m[PARTY] Removed '%s' from party '%s'.\033[0m\n", arg1, cli->party_code);
+        }
+        else
+        {
+            send_to_client(cli, "[SERVER] User '%s' is not in your party.\n", arg1);
+        }
+        pthread_mutex_unlock(&clients_mutex);
+        return 1;
+    }
+
+    if (strcmp(command, "partypromote") == 0)
+    {
+        if (arg1[0] == '\0')
+        {
+            send_to_client(cli, "[USAGE] /partypromote <username>\n");
+            return 1;
+        }
+        if (strlen(cli->party_code) == 0 || strcmp(cli->party_code, "public") == 0)
+        {
+            send_to_client(cli, "[SERVER] You are not in a private party.\n");
+            return 1;
+        }
+        if (!party_is_admin(cli->party_code, cli->username) && !cli->is_admin)
+        {
+            send_to_client(cli, "\033[1;31m[ERROR] Only party admins can promote other members.\033[0m\n");
+            return 1;
+        }
+        if (party_add_admin(cli->party_code, arg1))
+        {
+            send_to_client(cli, "\033[1;32m[PARTY] Promoted '%s' to party admin.\033[0m\n", arg1);
+            char pmsg[128];
+            snprintf(pmsg, sizeof(pmsg), "\033[1;33m[PARTY] %s promoted %s to party admin.\033[0m\n", cli->username, arg1);
+            party_broadcast(pmsg, cli->party_code, cli->sockfd);
+        }
+        else
+        {
+            send_to_client(cli, "[SERVER] Failed to promote '%s'.\n", arg1);
+        }
+        return 1;
+    }
+
+    if (strcmp(command, "partyinvite") == 0 || strcmp(command, "partyadd") == 0)
+    {
+        if (arg1[0] == '\0')
+        {
+            send_to_client(cli, "[USAGE] /partyinvite <username>\n");
+            return 1;
+        }
+        if (strlen(cli->party_code) == 0 || strcmp(cli->party_code, "public") == 0)
+        {
+            send_to_client(cli, "[SERVER] You are not in a private party.\n");
+            return 1;
+        }
+        if (!party_is_admin(cli->party_code, cli->username) && !cli->is_admin)
+        {
+            send_to_client(cli, "\033[1;31m[ERROR] Only party admins can invite members.\033[0m\n");
+            return 1;
+        }
+        pthread_mutex_lock(&clients_mutex);
+        client_t *target = NULL;
+        for (int i = 0; i < MAX_CLIENTS; ++i)
+        {
+            if (clients[i] && clients[i]->active && strcmp(clients[i]->username, arg1) == 0)
+            {
+                target = clients[i];
+                break;
+            }
+        }
+        if (target)
+        {
+            char inv_pkt[128];
+            snprintf(inv_pkt, sizeof(inv_pkt), "__PARTY_INVITE__:%s:%s\n", cli->party_code, cli->username);
+            send(target->sockfd, inv_pkt, strlen(inv_pkt), 0);
+            send_to_client(cli, "\033[1;32m[PARTY] Invitation sent to '%s'.\033[0m\n", arg1);
+        }
+        else
+        {
+            send_to_client(cli, "[SERVER] User '%s' is not online.\n", arg1);
+        }
+        pthread_mutex_unlock(&clients_mutex);
         return 1;
     }
 

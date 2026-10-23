@@ -385,3 +385,72 @@ int db_verify_user(const char *username, const char *password) {
     return verified;
 }
 
+int db_update_user_password(const char *username, const char *new_password) {
+    if (!username || !new_password || strlen(new_password) < 6) return 0;
+
+    pthread_mutex_lock(&db_lock);
+    FILE *f = fopen(DB_ACCOUNTS_FILE, "r");
+    if (!f) {
+        pthread_mutex_unlock(&db_lock);
+        return 0;
+    }
+
+    FILE *tmp = fopen(DB_ACCOUNTS_FILE ".tmp", "w");
+    if (!tmp) {
+        fclose(f);
+        pthread_mutex_unlock(&db_lock);
+        return 0;
+    }
+
+    unsigned char salt[SALT_LEN];
+    if (RAND_bytes(salt, sizeof(salt)) != 1) {
+        fclose(f);
+        fclose(tmp);
+        pthread_mutex_unlock(&db_lock);
+        return 0;
+    }
+
+    unsigned char hash[32];
+    if (hash_password_pbkdf2(new_password, salt, sizeof(salt), hash) != 0) {
+        fclose(f);
+        fclose(tmp);
+        pthread_mutex_unlock(&db_lock);
+        return 0;
+    }
+
+    char salt_hex[SALT_LEN * 2 + 1];
+    char hash_hex[32 * 2 + 1];
+    hex_encode(salt, sizeof(salt), salt_hex, sizeof(salt_hex));
+    hex_encode(hash, sizeof(hash), hash_hex, sizeof(hash_hex));
+
+    char line[256];
+    int updated = 0;
+    time_t now = time(NULL);
+
+    while (fgets(line, sizeof(line), f)) {
+        char u[64] = {0};
+        if (sscanf(line, "%63[^:]", u) == 1) {
+            if (strcasecmp(u, username) == 0) {
+                fprintf(tmp, "%s:%s:%s:%ld\n", username, salt_hex, hash_hex, (long)now);
+                updated = 1;
+            } else {
+                fputs(line, tmp);
+            }
+        }
+    }
+
+    fclose(f);
+    fclose(tmp);
+
+    if (updated) {
+        remove(DB_ACCOUNTS_FILE);
+        rename(DB_ACCOUNTS_FILE ".tmp", DB_ACCOUNTS_FILE);
+        chmod(DB_ACCOUNTS_FILE, 0600);
+    } else {
+        remove(DB_ACCOUNTS_FILE ".tmp");
+    }
+
+    pthread_mutex_unlock(&db_lock);
+    return updated;
+}
+

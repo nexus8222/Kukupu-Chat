@@ -34,10 +34,11 @@ static int history_pos = 0;
 
 static const char *tab_commands[] = {
     "/help", "/msg", "/e2ee", "/sendfile", "/fileaccept", "/filedecline",
-    "/editlast", "/deletelast",
+    "/editlast", "/deletelast", "/account", "/notifs", "/pm", "/pmaccept",
     "/whoami", "/users", "/ping", "/time", "/uptime", "/motd", "/clear",
-    "/lastseen", "/setcolor", "/colorlist", "/createparty", "/joinparty",
-    "/party", "/leaveparty", "/guessgame", "/guess", "/vanish", "/emoji",
+    "/lastseen", "/setcolor", "/colorlist", "/setname", "/changepwd",
+    "/createparty", "/joinparty", "/party", "/leaveparty", "/partykick",
+    "/partypromote", "/partyinvite", "/guessgame", "/guess", "/vanish", "/emoji",
     "/exit", "/kick", "/ban", "/unban", "/banlist", "/mute", "/unmute",
     "/mutelist", "/setadminpwd", "/broadcast", "/pin", "/setmotd", "/log",
     "/shutdown", "/parties", "/lockparty", "/unlockparty", "/invite", "/partyinfo", "/whois",
@@ -95,6 +96,82 @@ static void update_command_suggestion(void)
 {
     if (input_len > 0 && input[0] == '/')
     {
+        char cmd[64] = {0};
+        const char *space = strchr(input, ' ');
+        if (space)
+        {
+            size_t cmd_len = (size_t)(space - input);
+            if (cmd_len >= sizeof(cmd)) cmd_len = sizeof(cmd) - 1;
+            strncpy(cmd, input, cmd_len);
+            cmd[cmd_len] = '\0';
+
+            if (strcmp(cmd, "/msg") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /msg <username> <message>");
+            else if (strcmp(cmd, "/pm") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /pm <username>");
+            else if (strcmp(cmd, "/pmaccept") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /pmaccept <username>");
+            else if (strcmp(cmd, "/account") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Open Account Management Portal");
+            else if (strcmp(cmd, "/notifs") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Open Notifications Portal");
+            else if (strcmp(cmd, "/sendfile") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /sendfile <username> <filepath>");
+            else if (strcmp(cmd, "/fileaccept") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /fileaccept <transfer_id>");
+            else if (strcmp(cmd, "/filedecline") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /filedecline <transfer_id>");
+            else if (strcmp(cmd, "/editlast") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /editlast <new_message>");
+            else if (strcmp(cmd, "/vanish") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /vanish <seconds> <message>");
+            else if (strcmp(cmd, "/setcolor") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Colors: red, green, yellow, blue, magenta, cyan, white");
+            else if (strcmp(cmd, "/guess") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /guess <1-100>");
+            else if (strcmp(cmd, "/createparty") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /createparty <room_code>");
+            else if (strcmp(cmd, "/joinparty") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /joinparty <room_code>");
+            else if (strcmp(cmd, "/partykick") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /partykick <username>");
+            else if (strcmp(cmd, "/partypromote") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /partypromote <username>");
+            else if (strcmp(cmd, "/partyinvite") == 0 || strcmp(cmd, "/partyadd") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /partyinvite <username>");
+            else if (strcmp(cmd, "/setname") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /setname <display_name>");
+            else if (strcmp(cmd, "/changepwd") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /changepwd <new_password>");
+            else if (strcmp(cmd, "/invite") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /invite <username>");
+            else if (strcmp(cmd, "/whois") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /whois <username>");
+            else if (strcmp(cmd, "/mute") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /mute <username> <seconds>");
+            else if (strcmp(cmd, "/unmute") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /unmute <username>");
+            else if (strcmp(cmd, "/kick") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /kick <username>");
+            else if (strcmp(cmd, "/ban") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /ban <username>");
+            else if (strcmp(cmd, "/unban") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /unban <username>");
+            else if (strcmp(cmd, "/emoji") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /emoji <id 1-179>");
+            else if (strcmp(cmd, "/setadminpwd") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /setadminpwd <new_password>");
+            else if (strcmp(cmd, "/setmotd") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /setmotd <message>");
+            else if (strcmp(cmd, "/pin") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /pin <message>");
+            else if (strcmp(cmd, "/broadcast") == 0)
+                snprintf(current_suggestion, sizeof(current_suggestion), "Usage: /broadcast <message>");
+            else
+                current_suggestion[0] = '\0';
+            return;
+        }
+
         char matches[128] = {0};
         int count = 0;
         for (int i = 0; tab_commands[i] != NULL && count < 5; ++i)
@@ -161,7 +238,17 @@ static void handle_received_line(char *line)
         int seq = 0;
         if (e2ee_decrypt_packet(line, from, plaintext, sizeof(plaintext), &seq) == 0)
         {
-            ui_add_message(MSG_E2EE, from, plaintext, 0);
+            ui_add_pm_contact(from);
+            char room_tag[36];
+            snprintf(room_tag, sizeof(room_tag), "@%s", from);
+            ui_add_message_to_room(MSG_E2EE, from, plaintext, 0, NULL, room_tag);
+            if (strcmp(ui_get_room(), room_tag) != 0)
+            {
+                ui_inc_pm_unread(from);
+                char toast[128];
+                snprintf(toast, sizeof(toast), "New message from @%s", from);
+                ui_trigger_toast(toast, SOUND_NOTIFICATION);
+            }
         }
         else
         {
@@ -190,6 +277,7 @@ static void handle_received_line(char *line)
             snprintf(offer, sizeof(offer), "Offer: '%s' (%zu B) -> Type /fileaccept %d or /filedecline %d",
                      filename, fsize, fid, fid);
             ui_add_message(MSG_FILE, from, offer, fid);
+            ui_add_notification(NOTIF_FILE_OFFER, from, filename, "Incoming file transfer offer", fid);
         }
         return;
     }
@@ -264,7 +352,19 @@ static void handle_received_line(char *line)
         char *from = strtok(line + 12, ":");
         char *msg = strtok(NULL, "");
         if (from && msg)
-            ui_add_message(MSG_PRIVATE, from, msg, 0);
+        {
+            ui_add_pm_contact(from);
+            char room_tag[36];
+            snprintf(room_tag, sizeof(room_tag), "@%s", from);
+            ui_add_message_to_room(MSG_PRIVATE, from, msg, 0, NULL, room_tag);
+            if (strcmp(ui_get_room(), room_tag) != 0)
+            {
+                ui_inc_pm_unread(from);
+                char toast[128];
+                snprintf(toast, sizeof(toast), "PM from @%s", from);
+                ui_trigger_toast(toast, SOUND_NOTIFICATION);
+            }
+        }
         return;
     }
 
@@ -312,10 +412,171 @@ static void handle_received_line(char *line)
         return;
     }
 
+    if (strncmp(line, "__PMREQ__:", 10) == 0)
+    {
+        char from[32] = {0};
+        if (sscanf(line, "__PMREQ__:%31s", from) == 1)
+        {
+            ui_add_notification(NOTIF_PM_INVITE, from, "Personal Chat Invite", "Double Ratchet E2EE invite", 0);
+            char toast[128];
+            snprintf(toast, sizeof(toast), "@%s sent you a personal chat invite!", from);
+            ui_trigger_toast(toast, SOUND_NOTIFICATION);
+            char notif_msg[128];
+            snprintf(notif_msg, sizeof(notif_msg), "@%s sent you a personal chat invite! Click [Notifs] to accept.", from);
+            ui_add_message(MSG_SYSTEM, "PM", notif_msg, 0);
+        }
+        return;
+    }
+
+    if (strncmp(line, "__PMACCEPT__:", 13) == 0)
+    {
+        char from[32] = {0};
+        if (sscanf(line, "__PMACCEPT__:%31s", from) == 1)
+        {
+            ui_add_pm_contact(from);
+            char toast[128];
+            snprintf(toast, sizeof(toast), "@%s accepted your PM invite!", from);
+            ui_trigger_toast(toast, SOUND_SUCCESS);
+            char acc_msg[128];
+            snprintf(acc_msg, sizeof(acc_msg), "@%s accepted your PM invite! You are now connected in Personal Messages.", from);
+            ui_add_message(MSG_SYSTEM, "PM", acc_msg, 0);
+        }
+        return;
+    }
+
+    if (strncmp(line, "__PMDECLINE__:", 14) == 0)
+    {
+        char from[32] = {0};
+        if (sscanf(line, "__PMDECLINE__:%31s", from) == 1)
+        {
+            char toast[128];
+            snprintf(toast, sizeof(toast), "@%s declined your personal chat invite.", from);
+            ui_trigger_toast(toast, SOUND_ALERT);
+            char dec_msg[128];
+            snprintf(dec_msg, sizeof(dec_msg), "@%s declined your personal chat invite.", from);
+            ui_add_message(MSG_SYSTEM, "PM", dec_msg, 0);
+        }
+        return;
+    }
+
+    if (strncmp(line, "__SETNAME_OK__:", 15) == 0)
+    {
+        char new_name[32] = {0};
+        if (sscanf(line, "__SETNAME_OK__:%31[^\n\r]", new_name) == 1)
+        {
+            ui_set_profile_name(new_name);
+            char toast[128];
+            snprintf(toast, sizeof(toast), "Display name updated to: %s", new_name);
+            ui_trigger_toast(toast, SOUND_SUCCESS);
+        }
+        return;
+    }
+
+    if (strncmp(line, "__CHANGEPWD_OK__", 16) == 0)
+    {
+        ui_trigger_toast("Password updated successfully.", SOUND_SUCCESS);
+        return;
+    }
+
+    if (strncmp(line, "__CHANGEPWD_ERR__:", 18) == 0)
+    {
+        ui_trigger_toast(line + 18, SOUND_ERROR);
+        return;
+    }
+
+    if (strncmp(line, "__PARTY_JOINED__:", 17) == 0)
+    {
+        char pcode[16] = {0};
+        if (sscanf(line, "__PARTY_JOINED__:%15s", pcode) == 1)
+        {
+            ui_add_party(pcode);
+            ui_set_room(pcode);
+            char toast[64];
+            snprintf(toast, sizeof(toast), "Joined party #%s!", pcode);
+            ui_trigger_toast(toast, SOUND_SUCCESS);
+        }
+        return;
+    }
+
+    if (strncmp(line, "__PARTY_PENDING__:", 18) == 0)
+    {
+        char pcode[16] = {0};
+        if (sscanf(line, "__PARTY_PENDING__:%15s", pcode) == 1)
+        {
+            char toast[128];
+            snprintf(toast, sizeof(toast), "Join request sent to party owner for #%s. Awaiting approval...", pcode);
+            ui_trigger_toast(toast, SOUND_ALERT);
+        }
+        return;
+    }
+
+    if (strncmp(line, "__PARTY_DECLINED__:", 19) == 0)
+    {
+        char pcode[16] = {0};
+        if (sscanf(line, "__PARTY_DECLINED__:%15s", pcode) == 1)
+        {
+            char toast[128];
+            snprintf(toast, sizeof(toast), "Your request to join party #%s was declined.", pcode);
+            ui_trigger_toast(toast, SOUND_ERROR);
+        }
+        return;
+    }
+
+    if (strncmp(line, "__PARTY_REQ__:", 14) == 0)
+    {
+        char pcode[16] = {0}, req_user[32] = {0};
+        if (sscanf(line, "__PARTY_REQ__:%15[^:]:%31s", pcode, req_user) == 2)
+        {
+            char details[128];
+            snprintf(details, sizeof(details), "Requesting entry to party #%s", pcode);
+            int nid = ui_add_notification(NOTIF_PARTY_JOIN_REQ, req_user, "Party Join Request", details, 0);
+            ui_notif_t *nt = ui_get_notification_by_index(ui_get_notification_count() - 1);
+            if (nt && nt->id == nid)
+            {
+                strncpy(nt->extra, pcode, sizeof(nt->extra) - 1);
+            }
+            char toast[128];
+            snprintf(toast, sizeof(toast), "@%s requested to join Party #%s!", req_user, pcode);
+            ui_trigger_toast(toast, SOUND_NOTIFICATION);
+        }
+        return;
+    }
+
+    if (strncmp(line, "__PARTY_INVITE__:", 17) == 0)
+    {
+        char pcode[16] = {0}, inviter[32] = {0};
+        if (sscanf(line, "__PARTY_INVITE__:%15[^:]:%31s", pcode, inviter) == 2)
+        {
+            ui_add_party(pcode);
+            ui_set_room(pcode);
+            char toast[128];
+            snprintf(toast, sizeof(toast), "@%s invited you to Party #%s!", inviter, pcode);
+            ui_trigger_toast(toast, SOUND_SUCCESS);
+        }
+        return;
+    }
+
     if (strstr(line, "\033[2J") != NULL)
     {
         ui_clear_messages();
+        ui_render(input, cursor_pos, current_suggestion);
         return;
+    }
+
+    const char *p_join = strstr(line, "Joined party '");
+    if (!p_join) p_join = strstr(line, "Created party '");
+    if (p_join)
+    {
+        char pcode[16] = {0};
+        if (sscanf(p_join + 14, "%15[^']", pcode) == 1)
+        {
+            ui_set_room(pcode);
+            ui_add_party(pcode);
+        }
+    }
+    if (strstr(line, "You have left party"))
+    {
+        ui_set_room("0000");
     }
 
     // Extract sender color from original line before strip_ansi
@@ -515,6 +776,306 @@ static void *file_ticker_thread(void *arg)
     return NULL;
 }
 
+static time_t last_pm_invite_time = 0;
+static char last_pm_invite_user[32] = {0};
+
+static void handle_mouse_click_action(int col, int row)
+{
+    ui_action_result_t act = ui_handle_mouse_click(col, row);
+    switch (act.type)
+    {
+        case UI_ACTION_SEND_PM_INVITE:
+        {
+            time_t now = time(NULL);
+            if (now - last_pm_invite_time < 10 && strcmp(last_pm_invite_user, act.action_buf) == 0)
+            {
+                char warn[128];
+                snprintf(warn, sizeof(warn), "Rate limited: Please wait %d s before inviting %s again.",
+                         (int)(10 - (now - last_pm_invite_time)), act.action_buf);
+                ui_add_message(MSG_ERROR, "PM", warn, 0);
+            }
+            else
+            {
+                last_pm_invite_time = now;
+                size_t ulen = strlen(act.action_buf);
+                if (ulen >= sizeof(last_pm_invite_user)) ulen = sizeof(last_pm_invite_user) - 1;
+                memcpy(last_pm_invite_user, act.action_buf, ulen);
+                last_pm_invite_user[ulen] = '\0';
+                char pkt[300];
+                snprintf(pkt, sizeof(pkt), "__PMREQ__:%s\n", act.action_buf);
+                send(sockfd, pkt, strlen(pkt), 0);
+                char notice[128];
+                snprintf(notice, sizeof(notice), "Sent personal chat invitation to @%s.", act.action_buf);
+                ui_add_message(MSG_SYSTEM, "PM", notice, 0);
+            }
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_ACCEPT_PM_INVITE:
+        {
+            char pkt[300];
+            snprintf(pkt, sizeof(pkt), "__PMACCEPT__:%s\n", act.action_buf);
+            send(sockfd, pkt, strlen(pkt), 0);
+            ui_add_pm_contact(act.action_buf);
+            char room_tag[36];
+            snprintf(room_tag, sizeof(room_tag), "@%s", act.action_buf);
+            ui_set_room(room_tag);
+            char toast[128];
+            snprintf(toast, sizeof(toast), "Connected with @%s in Personal Messages.", act.action_buf);
+            ui_trigger_toast(toast, SOUND_SUCCESS);
+            input[0] = '\0';
+            input_len = 0;
+            cursor_pos = 0;
+            current_suggestion[0] = '\0';
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_DECLINE_PM_INVITE:
+        {
+            char pkt[300];
+            snprintf(pkt, sizeof(pkt), "__PMDECLINE__:%s\n", act.action_buf);
+            send(sockfd, pkt, strlen(pkt), 0);
+            char toast[128];
+            snprintf(toast, sizeof(toast), "Declined personal chat invite from @%s.", act.action_buf);
+            ui_trigger_toast(toast, SOUND_ALERT);
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_ACCEPT_FILE:
+        {
+            file_transfer_accept(act.action_param, sockfd);
+            ui_add_message(MSG_FILE, "Me", "Accepted file transfer.", act.action_param);
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_DECLINE_FILE:
+        {
+            file_transfer_decline(act.action_param, sockfd);
+            ui_add_message(MSG_FILE, "Me", "Declined file transfer.", act.action_param);
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_SWITCH_ROOM:
+        {
+            if (strcmp(act.action_buf, "__TOGGLE_VANISH__") == 0)
+            {
+                send(sockfd, "/vanish\n", 8, 0);
+            }
+            else if (strcmp(act.action_buf, "0000") == 0)
+            {
+                send(sockfd, "/leaveparty\n", 12, 0);
+                ui_set_room("0000");
+                ui_add_message(MSG_SYSTEM, "Room", "Switched to #0000 Public Lobby.", 0);
+            }
+            else if (act.action_buf[0] == '@')
+            {
+                ui_set_room(act.action_buf);
+                ui_clear_pm_unread(act.action_buf + 1);
+            }
+            else
+            {
+                char join_cmd[64];
+                snprintf(join_cmd, sizeof(join_cmd), "/joinparty %s\n", act.action_buf);
+                send(sockfd, join_cmd, strlen(join_cmd), 0);
+                ui_set_room(act.action_buf);
+            }
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_INSERT_TEXT:
+        {
+            int tlen = (int)strlen(act.action_buf);
+            if (input_len + tlen < (int)sizeof(input) - 1)
+            {
+                memmove(&input[cursor_pos + tlen], &input[cursor_pos], input_len - cursor_pos + 1);
+                memcpy(&input[cursor_pos], act.action_buf, tlen);
+                cursor_pos += tlen;
+                input_len += tlen;
+                input[input_len] = '\0';
+                update_command_suggestion();
+            }
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_TOGGLE_E2EE:
+        {
+            int current_e2ee = ui_get_e2ee();
+            ui_set_e2ee(!current_e2ee);
+            char notice[64];
+            snprintf(notice, sizeof(notice), "Double Ratchet E2EE is now %s.", !current_e2ee ? "ACTIVE" : "OFF");
+            ui_add_message(MSG_SYSTEM, "E2EE", notice, 0);
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_SET_COLOR:
+        {
+            const char *code = "\033[1;32m";
+            if (strcmp(act.action_buf, "cyan") == 0) code = "\033[1;36m";
+            else if (strcmp(act.action_buf, "yellow") == 0) code = "\033[1;33m";
+            else if (strcmp(act.action_buf, "magenta") == 0) code = "\033[1;35m";
+            else if (strcmp(act.action_buf, "blue") == 0) code = "\033[1;34m";
+            else if (strcmp(act.action_buf, "red") == 0) code = "\033[1;31m";
+            else if (strcmp(act.action_buf, "white") == 0) code = "\033[1;37m";
+            ui_set_user_color(code);
+
+            char col_cmd[300];
+            snprintf(col_cmd, sizeof(col_cmd), "/setcolor %s\n", act.action_buf);
+            send(sockfd, col_cmd, strlen(col_cmd), 0);
+
+            char toast[64];
+            snprintf(toast, sizeof(toast), "Theme color changed to %s", act.action_buf);
+            ui_trigger_toast(toast, SOUND_SUCCESS);
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_EDIT_NAME:
+        {
+            if (strlen(act.action_buf) > 0)
+            {
+                char pkt[128];
+                snprintf(pkt, sizeof(pkt), "__SETNAME__:%s\n", act.action_buf);
+                send(sockfd, pkt, strlen(pkt), 0);
+            }
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_CHANGE_PWD:
+        {
+            if (strlen(act.action_buf) >= 6)
+            {
+                char pkt[512];
+                snprintf(pkt, sizeof(pkt), "__CHANGEPWD__:%s\n", act.action_buf);
+                send(sockfd, pkt, strlen(pkt), 0);
+            }
+            else
+            {
+                ui_trigger_toast("Password must be at least 6 characters.", SOUND_ERROR);
+            }
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_LOGOUT:
+        {
+            send(sockfd, "/exit\n", 6, 0);
+            flag = 1;
+            break;
+        }
+        case UI_ACTION_PARTY_JOIN:
+        {
+            if (strlen(act.action_buf) > 0)
+            {
+                char pkt[128];
+                snprintf(pkt, sizeof(pkt), "__PARTY_JOINREQ__:%s\n", act.action_buf);
+                send(sockfd, pkt, strlen(pkt), 0);
+            }
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_PARTY_CREATE:
+        {
+            char pcode[32] = {0};
+            int priv = 0;
+            if (sscanf(act.action_buf, "%31[^:]:%d", pcode, &priv) >= 1)
+            {
+                if (strcmp(pcode, "auto") == 0 || strlen(pcode) == 0)
+                {
+                    snprintf(pcode, sizeof(pcode), "%04d", 1000 + (rand() % 9000));
+                }
+                char pkt[128];
+                snprintf(pkt, sizeof(pkt), "__PARTY_CREATE__:%s:%d\n", pcode, priv);
+                send(sockfd, pkt, strlen(pkt), 0);
+                ui_add_party(pcode);
+                ui_set_room(pcode);
+                char toast[128];
+                snprintf(toast, sizeof(toast), "Created & launched Party #%s (%s)!", pcode, priv ? "Approval Required" : "Open");
+                ui_trigger_toast(toast, SOUND_SUCCESS);
+            }
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_ACCEPT_PARTY_REQ:
+        {
+            char pcode[16] = {0}, target[32] = {0};
+            if (sscanf(act.action_buf, "%15[^:]:%31s", pcode, target) == 2)
+            {
+                char pkt[128];
+                snprintf(pkt, sizeof(pkt), "__PARTY_ACCREQ__:%s:%s\n", pcode, target);
+                send(sockfd, pkt, strlen(pkt), 0);
+                char toast[128];
+                snprintf(toast, sizeof(toast), "Approved @%s into Party #%s.", target, pcode);
+                ui_trigger_toast(toast, SOUND_SUCCESS);
+            }
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_DECLINE_PARTY_REQ:
+        {
+            char pcode[16] = {0}, target[32] = {0};
+            if (sscanf(act.action_buf, "%15[^:]:%31s", pcode, target) == 2)
+            {
+                char pkt[128];
+                snprintf(pkt, sizeof(pkt), "__PARTY_DECLREQ__:%s:%s\n", pcode, target);
+                send(sockfd, pkt, strlen(pkt), 0);
+                char toast[128];
+                snprintf(toast, sizeof(toast), "Declined join request from @%s.", target);
+                ui_trigger_toast(toast, SOUND_ALERT);
+            }
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_RBAC_KICK:
+        {
+            char cmd[300];
+            snprintf(cmd, sizeof(cmd), "/kick %s\n", act.action_buf);
+            send(sockfd, cmd, strlen(cmd), 0);
+            char toast[300];
+            snprintf(toast, sizeof(toast), "Kicked user @%s.", act.action_buf);
+            ui_trigger_toast(toast, SOUND_ALERT);
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_RBAC_BAN:
+        {
+            char cmd[300];
+            snprintf(cmd, sizeof(cmd), "/ban %s\n", act.action_buf);
+            send(sockfd, cmd, strlen(cmd), 0);
+            char toast[300];
+            snprintf(toast, sizeof(toast), "Banned user @%s.", act.action_buf);
+            ui_trigger_toast(toast, SOUND_ERROR);
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_RBAC_MUTE:
+        {
+            char cmd[300];
+            snprintf(cmd, sizeof(cmd), "/mute %s 60\n", act.action_buf);
+            send(sockfd, cmd, strlen(cmd), 0);
+            char toast[300];
+            snprintf(toast, sizeof(toast), "Muted @%s for 60 seconds.", act.action_buf);
+            ui_trigger_toast(toast, SOUND_ALERT);
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_RBAC_UNMUTE:
+        {
+            char cmd[300];
+            snprintf(cmd, sizeof(cmd), "/unmute %s\n", act.action_buf);
+            send(sockfd, cmd, strlen(cmd), 0);
+            char toast[300];
+            snprintf(toast, sizeof(toast), "Unmuted @%s.", act.action_buf);
+            ui_trigger_toast(toast, SOUND_SUCCESS);
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+        }
+        case UI_ACTION_OPEN_MODAL:
+        case UI_ACTION_CLOSE_MODAL:
+        case UI_ACTION_NONE:
+        default:
+            ui_render(input, cursor_pos, current_suggestion);
+            break;
+    }
+}
+
 static void chat_loop(void)
 {
     unsigned char ch;
@@ -528,9 +1089,19 @@ static void chat_loop(void)
         if (platform_read_char(&ch) <= 0)
             continue;
 
-        // Handle Escape sequences (Arrows, PageUp, PageDown)
+        // Handle Escape sequences (Arrows, PageUp, PageDown, Mouse, Modals)
         if (ch == 27)
         {
+            if (!platform_wait_input(25))
+            {
+                if (ui_get_active_modal() != UI_MODAL_NONE)
+                {
+                    ui_close_modal();
+                    ui_render(input, cursor_pos, current_suggestion);
+                }
+                continue;
+            }
+
             unsigned char seq1 = 0, seq2 = 0, seq3 = 0;
             if (platform_read_char(&seq1) > 0)
             {
@@ -538,6 +1109,44 @@ static void chat_loop(void)
                 {
                     if (platform_read_char(&seq2) > 0)
                     {
+                        if (seq2 == '<')
+                        {
+                            char m_buf[64] = {0};
+                            int m_idx = 0;
+                            unsigned char mc = 0;
+                            while (m_idx < 60 && platform_wait_input(20) && platform_read_char(&mc) > 0)
+                            {
+                                m_buf[m_idx++] = (char)mc;
+                                if (mc == 'M' || mc == 'm') break;
+                            }
+                            m_buf[m_idx] = '\0';
+                            if (m_idx > 0)
+                            {
+                                char m_act = m_buf[m_idx - 1];
+                                int m_btn = 0, m_col = 0, m_row = 0;
+                                if (sscanf(m_buf, "%d;%d;%d", &m_btn, &m_col, &m_row) == 3)
+                                {
+                                    if (m_act == 'M')
+                                    {
+                                        if (m_btn == 64)
+                                        {
+                                            ui_scroll_up(3);
+                                            ui_render(input, cursor_pos, current_suggestion);
+                                        }
+                                        else if (m_btn == 65)
+                                        {
+                                            ui_scroll_down(3);
+                                            ui_render(input, cursor_pos, current_suggestion);
+                                        }
+                                        else if (m_btn == 0)
+                                        {
+                                            handle_mouse_click_action(m_col, m_row);
+                                        }
+                                    }
+                                }
+                            }
+                            continue;
+                        }
                             if (seq2 == 'A') // Up Arrow
                             {
                                 if (input_len == 0)
@@ -644,9 +1253,18 @@ static void chat_loop(void)
                             }
                         }
                     }
+                    else if (seq1 == 'O')
+                {
+                    if (platform_read_char(&seq2) > 0 && seq2 == 'Q')
+                    {
+                        ui_open_modal(UI_MODAL_EMOJI_PICKER);
+                        ui_render(input, cursor_pos, current_suggestion);
+                        continue;
+                    }
                 }
-                continue;
             }
+            continue;
+        }
 
             // Ctrl+L (Redraw screen)
             if (ch == 12)
@@ -691,6 +1309,12 @@ static void chat_loop(void)
             // Backspace
             if (ch == 127 || ch == 8)
             {
+                if (ui_modal_is_input_active())
+                {
+                    ui_modal_input_backspace();
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
                 if (cursor_pos > 0)
                 {
                     memmove(&input[cursor_pos - 1], &input[cursor_pos], input_len - cursor_pos + 1);
@@ -703,9 +1327,72 @@ static void chat_loop(void)
                 continue;
             }
 
-            // Enter (Send message or execute command)
+            // Enter (Send message, execute command, or submit modal)
             if (ch == '\n' || ch == '\r')
             {
+                if (ui_modal_is_input_active())
+                {
+                    const char *m_in = ui_modal_get_input();
+                    ui_modal_t cur_m = ui_get_active_modal();
+                    if (cur_m == UI_MODAL_EDIT_NAME)
+                    {
+                        if (strlen(m_in) > 0)
+                        {
+                            char pkt[128];
+                            snprintf(pkt, sizeof(pkt), "__SETNAME__:%s\n", m_in);
+                            send(sockfd, pkt, strlen(pkt), 0);
+                        }
+                        ui_close_modal();
+                    }
+                    else if (cur_m == UI_MODAL_CHANGE_PWD)
+                    {
+                        if (strlen(m_in) >= 6)
+                        {
+                            char pkt[256];
+                            snprintf(pkt, sizeof(pkt), "__CHANGEPWD__:%s\n", m_in);
+                            send(sockfd, pkt, strlen(pkt), 0);
+                        }
+                        else
+                        {
+                            ui_trigger_toast("Password must be at least 6 characters.", SOUND_ERROR);
+                        }
+                        ui_close_modal();
+                    }
+                    else if (cur_m == UI_MODAL_PARTY_JOIN_CREATE)
+                    {
+                        if (ui_get_party_modal_tab() == 1) // Join
+                        {
+                            if (strlen(m_in) > 0)
+                            {
+                                char pkt[128];
+                                snprintf(pkt, sizeof(pkt), "__PARTY_JOINREQ__:%s\n", m_in);
+                                send(sockfd, pkt, strlen(pkt), 0);
+                            }
+                            ui_close_modal();
+                        }
+                        else if (ui_get_party_modal_tab() == 2) // Create
+                        {
+                            char pcode[32] = {0};
+                            if (strlen(m_in) == 0)
+                                snprintf(pcode, sizeof(pcode), "%04d", 1000 + (rand() % 9000));
+                            else
+                                strncpy(pcode, m_in, sizeof(pcode) - 1);
+                            int priv = ui_party_modal_get_privacy();
+                            char pkt[128];
+                            snprintf(pkt, sizeof(pkt), "__PARTY_CREATE__:%s:%d\n", pcode, priv);
+                            send(sockfd, pkt, strlen(pkt), 0);
+                            ui_add_party(pcode);
+                            ui_set_room(pcode);
+                            char toast[128];
+                            snprintf(toast, sizeof(toast), "Created & launched Party #%s (%s)!", pcode, priv ? "Approval Required" : "Open");
+                            ui_trigger_toast(toast, SOUND_SUCCESS);
+                            ui_close_modal();
+                        }
+                    }
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
                 input[input_len] = '\0';
                 history_add(input);
 
@@ -917,23 +1604,96 @@ static void chat_loop(void)
                     continue;
                 }
 
-                if (strcmp(input, "/emoji") == 0)
+                if (strcmp(input, "/account") == 0)
                 {
-                    ui_add_message(MSG_SYSTEM, "Emoji", "======[ Emoji Catalog (use /emoji <id>) ]======", 0);
-                    char row[256];
-                    row[0] = '\0';
-                    for (int i = 0; i < EMOJI_COUNT; ++i)
+                    ui_open_modal(UI_MODAL_ACCOUNT);
+                    input_len = 0;
+                    cursor_pos = 0;
+                    input[0] = '\0';
+                    current_suggestion[0] = '\0';
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
+                if (strcmp(input, "/notifs") == 0)
+                {
+                    ui_open_modal(UI_MODAL_NOTIFS);
+                    input_len = 0;
+                    cursor_pos = 0;
+                    input[0] = '\0';
+                    current_suggestion[0] = '\0';
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
+                if (strncmp(input, "/pm ", 4) == 0)
+                {
+                    char target[32] = {0};
+                    if (sscanf(input + 4, "%31s", target) == 1)
                     {
-                        char item[32];
-                        snprintf(item, sizeof(item), "%2d. %s  ", i + 1, get_emoji_by_index(i + 1));
-                        strncat(row, item, sizeof(row) - strlen(row) - 1);
-                        if ((i + 1) % 8 == 0 || i == EMOJI_COUNT - 1)
+                        time_t now = time(NULL);
+                        if (now - last_pm_invite_time < 10 && strcmp(last_pm_invite_user, target) == 0)
                         {
-                            ui_add_message(MSG_SYSTEM, "Emoji", row, 0);
-                            row[0] = '\0';
+                            char warn[128];
+                            snprintf(warn, sizeof(warn), "Rate limited: Please wait %d s before inviting %s again.",
+                                     (int)(10 - (now - last_pm_invite_time)), target);
+                            ui_add_message(MSG_ERROR, "PM", warn, 0);
+                        }
+                        else
+                        {
+                            last_pm_invite_time = now;
+                            snprintf(last_pm_invite_user, sizeof(last_pm_invite_user), "%s", target);
+                            char pkt[128];
+                            snprintf(pkt, sizeof(pkt), "__PMREQ__:%s\n", target);
+                            send(sockfd, pkt, strlen(pkt), 0);
+                            char notice[128];
+                            snprintf(notice, sizeof(notice), "Sent personal chat invitation to @%s.", target);
+                            ui_add_message(MSG_SYSTEM, "PM", notice, 0);
                         }
                     }
-                    ui_add_message(MSG_SYSTEM, "Emoji", "Type /emoji <number> to send an emoji.", 0);
+                    else
+                    {
+                        ui_add_message(MSG_SYSTEM, "Usage", "/pm <username>", 0);
+                    }
+                    input_len = 0;
+                    cursor_pos = 0;
+                    input[0] = '\0';
+                    current_suggestion[0] = '\0';
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
+                if (strncmp(input, "/pmaccept ", 10) == 0)
+                {
+                    char target[32] = {0};
+                    if (sscanf(input + 10, "%31s", target) == 1)
+                    {
+                        char pkt[128];
+                        snprintf(pkt, sizeof(pkt), "__PMACCEPT__:%s\n", target);
+                        send(sockfd, pkt, strlen(pkt), 0);
+                        char notice[128];
+                        snprintf(notice, sizeof(notice), "Accepted invite from @%s. Redirecting to personal chat...", target);
+                        ui_add_message(MSG_SYSTEM, "PM", notice, 0);
+                        snprintf(input, sizeof(input), "/msg %s ", target);
+                        input_len = (int)strlen(input);
+                        cursor_pos = input_len;
+                        update_command_suggestion();
+                    }
+                    else
+                    {
+                        ui_add_message(MSG_SYSTEM, "Usage", "/pmaccept <username>", 0);
+                        input_len = 0;
+                        cursor_pos = 0;
+                        input[0] = '\0';
+                        current_suggestion[0] = '\0';
+                    }
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
+                if (strcmp(input, "/emoji") == 0)
+                {
+                    ui_open_modal(UI_MODAL_EMOJI_PICKER);
                     input_len = 0;
                     cursor_pos = 0;
                     input[0] = '\0';
@@ -973,6 +1733,7 @@ static void chat_loop(void)
                     if (sscanf(input + 13, "%15s", pcode) == 1)
                     {
                         ui_set_room(pcode);
+                        ui_add_party(pcode);
                     }
                 }
 
@@ -982,6 +1743,7 @@ static void chat_loop(void)
                     if (sscanf(input + 11, "%15s", pcode) == 1)
                     {
                         ui_set_room(pcode);
+                        ui_add_party(pcode);
                     }
                 }
 
@@ -992,9 +1754,46 @@ static void chat_loop(void)
 
                 if (input_len > 0)
                 {
-                    char send_buf[INPUT_BUFFER + 4];
-                    snprintf(send_buf, sizeof(send_buf), "%s\n", input);
-                    send(sockfd, send_buf, strlen(send_buf), 0);
+                    const char *c_room = ui_get_room();
+                    if (c_room && c_room[0] == '@' && input[0] != '/')
+                    {
+                        const char *target = c_room + 1;
+                        ratchet_session_t *s = e2ee_find_session(target);
+                        if (!s || !s->active)
+                        {
+                            char kreq[128];
+                            snprintf(kreq, sizeof(kreq), "__KEYREQ__:%s\n", target);
+                            send(sockfd, kreq, strlen(kreq), 0);
+                            for (int w = 0; w < 10; w++)
+                            {
+                                usleep(30000);
+                                s = e2ee_find_session(target);
+                                if (s && s->active) break;
+                            }
+                        }
+
+                        char e2ee_packet[4096];
+                        if (s && s->active && e2ee_encrypt_message(target, input, e2ee_packet, sizeof(e2ee_packet)) == 0)
+                        {
+                            char send_buf[sizeof(e2ee_packet) + 32];
+                            snprintf(send_buf, sizeof(send_buf), "%s\n", e2ee_packet);
+                            send(sockfd, send_buf, strlen(send_buf), 0);
+                            ui_add_message_to_room(MSG_SELF, username, input, 0, ui_get_user_color(), c_room);
+                        }
+                        else
+                        {
+                            char pm_pkt[INPUT_BUFFER + 64];
+                            snprintf(pm_pkt, sizeof(pm_pkt), "/msg %s %s\n", target, input);
+                            send(sockfd, pm_pkt, strlen(pm_pkt), 0);
+                            ui_add_message_to_room(MSG_SELF, username, input, 0, ui_get_user_color(), c_room);
+                        }
+                    }
+                    else
+                    {
+                        char send_buf[INPUT_BUFFER + 4];
+                        snprintf(send_buf, sizeof(send_buf), "%s\n", input);
+                        send(sockfd, send_buf, strlen(send_buf), 0);
+                    }
                 }
 
                 input_len = 0;
@@ -1009,6 +1808,75 @@ static void chat_loop(void)
             // Printable character input (including multibyte UTF-8 sequences)
             if ((unsigned char)ch >= 32 && (unsigned char)ch != 127)
             {
+                if (ui_modal_is_input_active())
+                {
+                    ui_modal_input_char(ch);
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
+                if (ui_get_active_modal() == UI_MODAL_ACCOUNT)
+                {
+                    if (ch >= '1' && ch <= '7')
+                    {
+                        const char *cols[] = {"green", "cyan", "yellow", "magenta", "blue", "red", "white"};
+                        const char *codes[] = {"\033[1;32m", "\033[1;36m", "\033[1;33m", "\033[1;35m", "\033[1;34m", "\033[1;31m", "\033[1;37m"};
+                        int c_idx = ch - '1';
+                        ui_set_user_color(codes[c_idx]);
+                        char col_cmd[128];
+                        snprintf(col_cmd, sizeof(col_cmd), "/setcolor %s\n", cols[c_idx]);
+                        send(sockfd, col_cmd, strlen(col_cmd), 0);
+                        char toast[64];
+                        snprintf(toast, sizeof(toast), "Theme color set to %s", cols[c_idx]);
+                        ui_trigger_toast(toast, SOUND_SUCCESS);
+                    }
+                    else if (ch == 'p' || ch == 'P')
+                    {
+                        ui_open_modal(UI_MODAL_CHANGE_PWD);
+                        ui_modal_clear_input();
+                    }
+                    else if (ch == 'e' || ch == 'E')
+                    {
+                        ui_open_modal(UI_MODAL_EDIT_NAME);
+                        ui_modal_clear_input();
+                    }
+                    else if (ch == 'l' || ch == 'L')
+                    {
+                        send(sockfd, "/exit\n", 6, 0);
+                        flag = 1;
+                        break;
+                    }
+                    else if ((ch == 'a' || ch == 'A') && strcmp(username, "admin") == 0)
+                    {
+                        ui_open_modal(UI_MODAL_RBAC_USERS);
+                    }
+                    else if (ch == 'x' || ch == 'X')
+                    {
+                        ui_close_modal();
+                    }
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
+                if (ui_get_active_modal() == UI_MODAL_PARTY_JOIN_CREATE && ui_get_party_modal_tab() == 0)
+                {
+                    if (ch == '1') { ui_set_party_modal_tab(1); ui_modal_clear_input(); }
+                    else if (ch == '2') { ui_set_party_modal_tab(2); ui_modal_clear_input(); }
+                    else if (ch == 'x' || ch == 'X') { ui_close_modal(); }
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
+                if (ui_get_active_modal() != UI_MODAL_NONE)
+                {
+                    if (ch == 'x' || ch == 'X')
+                    {
+                        ui_close_modal();
+                        ui_render(input, cursor_pos, current_suggestion);
+                    }
+                    continue;
+                }
+
                 if (input_len < INPUT_BUFFER - 4)
                 {
                     if (cursor_pos < input_len)

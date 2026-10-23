@@ -219,6 +219,277 @@ static void handle_internal_protocol(const char *buffer, client_t *cli)
         return;
     }
 
+    if (strncmp(buffer, "__PMREQ__:", 10) == 0)
+    {
+        char target_name[32] = {0};
+        if (sscanf(buffer, "__PMREQ__:%31s", target_name) == 1)
+        {
+            pthread_mutex_lock(&clients_mutex);
+            client_t *target = NULL;
+            for (int i = 0; i < MAX_CLIENTS; ++i)
+            {
+                if (clients[i] && clients[i]->active && strcmp(clients[i]->username, target_name) == 0)
+                {
+                    target = clients[i];
+                    break;
+                }
+            }
+            if (target)
+            {
+                char req_pkt[128];
+                snprintf(req_pkt, sizeof(req_pkt), "__PMREQ__:%s\n", cli->username);
+                send(target->sockfd, req_pkt, strlen(req_pkt), 0);
+            }
+            else
+            {
+                char notfound[128];
+                snprintf(notfound, sizeof(notfound), "\033[1;31m[PM] User '%s' is not online.\033[0m\n", target_name);
+                send(cli->sockfd, notfound, strlen(notfound), 0);
+            }
+            pthread_mutex_unlock(&clients_mutex);
+        }
+        return;
+    }
+
+    if (strncmp(buffer, "__PMACCEPT__:", 13) == 0)
+    {
+        char target_name[32] = {0};
+        if (sscanf(buffer, "__PMACCEPT__:%31s", target_name) == 1)
+        {
+            pthread_mutex_lock(&clients_mutex);
+            client_t *target = NULL;
+            for (int i = 0; i < MAX_CLIENTS; ++i)
+            {
+                if (clients[i] && clients[i]->active && strcmp(clients[i]->username, target_name) == 0)
+                {
+                    target = clients[i];
+                    break;
+                }
+            }
+            if (target)
+            {
+                char acc_pkt[128];
+                snprintf(acc_pkt, sizeof(acc_pkt), "__PMACCEPT__:%s\n", cli->username);
+                send(target->sockfd, acc_pkt, strlen(acc_pkt), 0);
+            }
+            pthread_mutex_unlock(&clients_mutex);
+        }
+        return;
+    }
+
+    if (strncmp(buffer, "__PMDECLINE__:", 14) == 0)
+    {
+        char target_name[32] = {0};
+        if (sscanf(buffer, "__PMDECLINE__:%31s", target_name) == 1)
+        {
+            pthread_mutex_lock(&clients_mutex);
+            client_t *target = NULL;
+            for (int i = 0; i < MAX_CLIENTS; ++i)
+            {
+                if (clients[i] && clients[i]->active && strcmp(clients[i]->username, target_name) == 0)
+                {
+                    target = clients[i];
+                    break;
+                }
+            }
+            if (target)
+            {
+                char dec_pkt[128];
+                snprintf(dec_pkt, sizeof(dec_pkt), "__PMDECLINE__:%s\n", cli->username);
+                send(target->sockfd, dec_pkt, strlen(dec_pkt), 0);
+            }
+            pthread_mutex_unlock(&clients_mutex);
+        }
+        return;
+    }
+
+    if (strncmp(buffer, "__SETNAME__:", 12) == 0)
+    {
+        char new_name[32] = {0};
+        if (sscanf(buffer, "__SETNAME__:%31[^\n\r]", new_name) == 1)
+        {
+            pthread_mutex_lock(&clients_mutex);
+            strncpy(cli->profile_name, new_name, sizeof(cli->profile_name) - 1);
+            cli->profile_name[sizeof(cli->profile_name) - 1] = '\0';
+            pthread_mutex_unlock(&clients_mutex);
+            char ok_pkt[128];
+            snprintf(ok_pkt, sizeof(ok_pkt), "__SETNAME_OK__:%s\n", cli->profile_name);
+            send(cli->sockfd, ok_pkt, strlen(ok_pkt), 0);
+        }
+        return;
+    }
+
+    if (strncmp(buffer, "__CHANGEPWD__:", 14) == 0)
+    {
+        char new_pwd[128] = {0};
+        if (sscanf(buffer, "__CHANGEPWD__:%127s", new_pwd) == 1)
+        {
+            int success = 0;
+            if (cli->is_admin)
+            {
+                success = db_set_admin_password(new_pwd);
+            }
+            else if (cli->is_registered)
+            {
+                success = db_update_user_password(cli->username, new_pwd);
+            }
+            if (success)
+            {
+                send(cli->sockfd, "__CHANGEPWD_OK__\n", 17, 0);
+            }
+            else
+            {
+                send(cli->sockfd, "__CHANGEPWD_ERR__:Could not update password (min 6 chars).\n", 58, 0);
+            }
+        }
+        return;
+    }
+
+    if (strncmp(buffer, "__PARTY_CREATE__:", 17) == 0)
+    {
+        char pcode[16] = {0};
+        int priv = 0;
+        if (sscanf(buffer, "__PARTY_CREATE__:%15[^:]:%d", pcode, &priv) >= 1)
+        {
+            if (create_party_with_owner(pcode, cli->username, priv))
+            {
+                pthread_mutex_lock(&clients_mutex);
+                strncpy(cli->party_code, pcode, sizeof(cli->party_code) - 1);
+                cli->party_code[sizeof(cli->party_code) - 1] = '\0';
+                pthread_mutex_unlock(&clients_mutex);
+
+                char ok_pkt[128];
+                snprintf(ok_pkt, sizeof(ok_pkt), "__PARTY_CREATED__:%s\n", pcode);
+                send(cli->sockfd, ok_pkt, strlen(ok_pkt), 0);
+            }
+            else
+            {
+                char err_pkt[128];
+                snprintf(err_pkt, sizeof(err_pkt), "__PARTY_ERR__:Party code '%s' already exists or limit reached.\n", pcode);
+                send(cli->sockfd, err_pkt, strlen(err_pkt), 0);
+            }
+        }
+        return;
+    }
+
+    if (strncmp(buffer, "__PARTY_JOINREQ__:", 18) == 0)
+    {
+        char pcode[16] = {0};
+        if (sscanf(buffer, "__PARTY_JOINREQ__:%15s", pcode) == 1)
+        {
+            if (!party_exists(pcode))
+            {
+                char err_pkt[128];
+                snprintf(err_pkt, sizeof(err_pkt), "__PARTY_ERR__:Party '%s' does not exist.\n", pcode);
+                send(cli->sockfd, err_pkt, strlen(err_pkt), 0);
+                return;
+            }
+
+            int priv = party_get_privacy(pcode);
+            if (priv == 0)
+            {
+                // Open party: join immediately
+                pthread_mutex_lock(&clients_mutex);
+                strncpy(cli->party_code, pcode, sizeof(cli->party_code) - 1);
+                cli->party_code[sizeof(cli->party_code) - 1] = '\0';
+                pthread_mutex_unlock(&clients_mutex);
+
+                char ok_pkt[128];
+                snprintf(ok_pkt, sizeof(ok_pkt), "__PARTY_JOINED__:%s\n", pcode);
+                send(cli->sockfd, ok_pkt, strlen(ok_pkt), 0);
+            }
+            else
+            {
+                // Private party: request approval from party owner
+                const char *owner = party_get_owner(pcode);
+                pthread_mutex_lock(&clients_mutex);
+                client_t *owner_cli = NULL;
+                for (int i = 0; i < MAX_CLIENTS; ++i)
+                {
+                    if (clients[i] && clients[i]->active && strcmp(clients[i]->username, owner) == 0)
+                    {
+                        owner_cli = clients[i];
+                        break;
+                    }
+                }
+                if (owner_cli)
+                {
+                    char req_pkt[128];
+                    snprintf(req_pkt, sizeof(req_pkt), "__PARTY_REQ__:%s:%s\n", pcode, cli->username);
+                    send(owner_cli->sockfd, req_pkt, strlen(req_pkt), 0);
+                    char pend_pkt[64];
+                    snprintf(pend_pkt, sizeof(pend_pkt), "__PARTY_PENDING__:%s\n", pcode);
+                    send(cli->sockfd, pend_pkt, strlen(pend_pkt), 0);
+                }
+                else
+                {
+                    char err_pkt[128];
+                    snprintf(err_pkt, sizeof(err_pkt), "__PARTY_ERR__:Party owner is currently offline.\n");
+                    send(cli->sockfd, err_pkt, strlen(err_pkt), 0);
+                }
+                pthread_mutex_unlock(&clients_mutex);
+            }
+        }
+        return;
+    }
+
+    if (strncmp(buffer, "__PARTY_ACCREQ__:", 17) == 0)
+    {
+        char pcode[16] = {0}, req_user[32] = {0};
+        if (sscanf(buffer, "__PARTY_ACCREQ__:%15[^:]:%31s", pcode, req_user) == 2)
+        {
+            if (party_is_admin(pcode, cli->username) || cli->is_admin)
+            {
+                pthread_mutex_lock(&clients_mutex);
+                client_t *target = NULL;
+                for (int i = 0; i < MAX_CLIENTS; ++i)
+                {
+                    if (clients[i] && clients[i]->active && strcmp(clients[i]->username, req_user) == 0)
+                    {
+                        target = clients[i];
+                        break;
+                    }
+                }
+                if (target)
+                {
+                    strncpy(target->party_code, pcode, sizeof(target->party_code) - 1);
+                    target->party_code[sizeof(target->party_code) - 1] = '\0';
+                    char j_pkt[128];
+                    snprintf(j_pkt, sizeof(j_pkt), "__PARTY_JOINED__:%s\n", pcode);
+                    send(target->sockfd, j_pkt, strlen(j_pkt), 0);
+                }
+                pthread_mutex_unlock(&clients_mutex);
+            }
+        }
+        return;
+    }
+
+    if (strncmp(buffer, "__PARTY_DECLREQ__:", 18) == 0)
+    {
+        char pcode[16] = {0}, req_user[32] = {0};
+        if (sscanf(buffer, "__PARTY_DECLREQ__:%15[^:]:%31s", pcode, req_user) == 2)
+        {
+            pthread_mutex_lock(&clients_mutex);
+            client_t *target = NULL;
+            for (int i = 0; i < MAX_CLIENTS; ++i)
+            {
+                if (clients[i] && clients[i]->active && strcmp(clients[i]->username, req_user) == 0)
+                {
+                    target = clients[i];
+                    break;
+                }
+            }
+            if (target)
+            {
+                char d_pkt[128];
+                snprintf(d_pkt, sizeof(d_pkt), "__PARTY_DECLINED__:%s\n", pcode);
+                send(target->sockfd, d_pkt, strlen(d_pkt), 0);
+            }
+            pthread_mutex_unlock(&clients_mutex);
+        }
+        return;
+    }
+
     if (strncmp(buffer, "__FILEREQ__:", 12) == 0)
     {
         int fid = 0;
@@ -420,14 +691,31 @@ void *handle_client(void *arg)
             continue;
         }
 
-        // Protocol 2: Registered User Login
+        // Protocol 2: Registered User / Admin Login
         if (strncmp(auth_buf, "__LOGIN__:", 10) == 0)
         {
             char log_user[64] = {0};
             char log_pwd[128] = {0};
             if (sscanf(auth_buf + 10, "%63[^:]:%127s", log_user, log_pwd) == 2)
             {
-                if (!db_user_exists(log_user) || !db_verify_user(log_user, log_pwd))
+                int valid = 0;
+                int is_admin = 0;
+
+                if (strcasecmp(log_user, "admin") == 0)
+                {
+                    if (db_verify_admin_password(log_pwd))
+                    {
+                        valid = 1;
+                        is_admin = 1;
+                        strcpy(log_user, "admin");
+                    }
+                }
+                else if (db_user_exists(log_user) && db_verify_user(log_user, log_pwd))
+                {
+                    valid = 1;
+                }
+
+                if (!valid)
                 {
                     send(cli->sockfd, "__LOGIN_ERR__:Invalid username or password.\n", 44, 0);
                     continue;
@@ -453,7 +741,10 @@ void *handle_client(void *arg)
 
                 strncpy(cli->username, log_user, sizeof(cli->username) - 1);
                 cli->username[sizeof(cli->username) - 1] = '\0';
+                strncpy(cli->profile_name, log_user, sizeof(cli->profile_name) - 1);
+                cli->profile_name[sizeof(cli->profile_name) - 1] = '\0';
                 cli->is_registered = 1;
+                cli->is_admin = is_admin;
                 authenticated = 1;
                 send(cli->sockfd, "__LOGIN_OK__\n", 13, 0);
                 break;
@@ -504,6 +795,8 @@ void *handle_client(void *arg)
 
             strncpy(cli->username, guest_user, sizeof(cli->username) - 1);
             cli->username[sizeof(cli->username) - 1] = '\0';
+            strncpy(cli->profile_name, guest_user, sizeof(cli->profile_name) - 1);
+            cli->profile_name[sizeof(cli->profile_name) - 1] = '\0';
             cli->is_registered = 0;
             authenticated = 1;
             send(cli->sockfd, "__GUEST_OK__\n", 13, 0);
@@ -555,6 +848,8 @@ void *handle_client(void *arg)
                     auth_success = 1;
                     strncpy(cli->username, name, sizeof(cli->username) - 1);
                     cli->username[sizeof(cli->username) - 1] = '\0';
+                    strncpy(cli->profile_name, name, sizeof(cli->profile_name) - 1);
+                    cli->profile_name[sizeof(cli->profile_name) - 1] = '\0';
                     send(cli->sockfd, "true\n", 5, 0);
                     authenticated = 1;
                     break;
@@ -632,6 +927,8 @@ void *handle_client(void *arg)
                             {
                                 strncpy(cli->username, uname, sizeof(cli->username) - 1);
                                 cli->username[sizeof(cli->username) - 1] = '\0';
+                                strncpy(cli->profile_name, uname, sizeof(cli->profile_name) - 1);
+                                cli->profile_name[sizeof(cli->profile_name) - 1] = '\0';
                             }
                         }
                     }
@@ -676,6 +973,8 @@ void *handle_client(void *arg)
 
         strncpy(cli->username, name, sizeof(cli->username) - 1);
         cli->username[sizeof(cli->username) - 1] = '\0';
+        strncpy(cli->profile_name, name, sizeof(cli->profile_name) - 1);
+        cli->profile_name[sizeof(cli->profile_name) - 1] = '\0';
         cli->is_registered = 0;
         authenticated = 1;
         break;

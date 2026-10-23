@@ -89,7 +89,7 @@ TARGET_CLIENT_WIN = client.exe
 OBJS_SERVER_WIN = $(patsubst $(SRC_DIR)/%.c, $(WIN_BUILD_DIR)/%.o, $(SRCS_SERVER))
 OBJS_CLIENT_WIN = $(patsubst $(SRC_DIR)/%.c, $(WIN_BUILD_DIR)/%.o, $(SRCS_CLIENT))
 
-.PHONY: all clean test test-commands test-auth test-all windows
+.PHONY: all clean test test-commands test-auth test-interactive test-ui test-all windows
 
 all: $(TARGET_SERVER) $(TARGET_CLIENT)
 
@@ -131,7 +131,15 @@ test-commands: $(TARGET_SERVER)
 test-auth: $(TARGET_SERVER)
 	python3 tests/test_auth_and_features.py
 
-test-all: test test-commands test-auth
+test-interactive: $(TARGET_SERVER)
+	python3 tests/test_interactive_tui.py
+
+test-ui: $(BUILD_DIR)/client/ui.o $(BUILD_DIR)/common/emoji.o
+	$(CC) $(CFLAGS) -o test_ui_interactive tests/test_ui_interactive.c $^
+	./test_ui_interactive
+	@rm -f test_ui_interactive
+
+test-all: test test-commands test-auth test-interactive test-ui
 
 $(TARGET_TEST): $(TESTS_DIR)/test_e2e_full.c $(BUILD_DIR)/common/crypto_utils.o $(BUILD_DIR)/client/e2ee.o $(BUILD_DIR)/client/file_transfer.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)

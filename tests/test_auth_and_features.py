@@ -183,6 +183,40 @@ def run_tests():
         assert got_msg, "Guest did not receive broadcast message from registered user"
         print("  ✓ Broadcast message with registered identity delivered successfully")
 
+        print("[TEST] 8. Admin Sign-In via Protocol 2 (__LOGIN__:admin:admin123)")
+        s4 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s4.connect(("127.0.0.1", PORT))
+        # Wrong admin password
+        s4.sendall(b"__LOGIN__:admin:wrongpass\n")
+        resp = recv_line(s4)
+        assert "__LOGIN_ERR__" in resp, f"Expected LOGIN_ERR for wrong admin password, got: {resp}"
+        print("  ✓ Wrong admin password rejected")
+
+        # Correct admin password
+        s4.sendall(b"__LOGIN__:admin:admin123\n")
+        resp = recv_line(s4)
+        assert "__LOGIN_OK__" in resp, f"Expected LOGIN_OK for admin, got: {resp}"
+        print("  ✓ Correct admin password authenticated via admin.cred PBKDF2")
+
+        # Verify admin command works directly
+        time.sleep(0.5)
+        s4.sendall(b"/motd\n")
+        time.sleep(0.3)
+        got_motd = False
+        while True:
+            s4.settimeout(1.0)
+            try:
+                line = recv_line(s4)
+                if not line: break
+                if "Message of the Day" in line or "[MOTD]" in line:
+                    got_motd = True
+                    break
+            except socket.timeout:
+                break
+        assert got_motd, "Admin session could not execute admin commands"
+        print("  ✓ Admin session successfully authenticated with full administrative privileges")
+        s4.close()
+
         s1.close()
         s2.close()
         print("\n============================================================")

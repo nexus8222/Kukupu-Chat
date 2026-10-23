@@ -19,6 +19,7 @@
 typedef struct client {
     socket_t sockfd;
     char username[USERNAME_LEN];
+    char profile_name[32];
     
     int active; 
     char ip[INET_ADDRSTRLEN];   // use system-defined 16

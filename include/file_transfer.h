@@ -26,6 +26,7 @@ typedef struct {
     char expected_sha256[SHA256_HEX_LEN];
     
     FILE *fp;
+    size_t chunk_size;
     size_t bytes_transferred;
     int current_chunk;
     int total_chunks;

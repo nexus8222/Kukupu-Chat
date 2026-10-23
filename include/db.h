@@ -33,5 +33,6 @@ int db_get_user_key(const char *username, char *out_pubkey_hex, size_t max_len);
 int db_register_user(const char *username, const char *password, char *err_msg, size_t err_len);
 int db_verify_user(const char *username, const char *password);
 int db_user_exists(const char *username);
+int db_update_user_password(const char *username, const char *new_password);
 
 #endif // DB_H

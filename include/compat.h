@@ -57,6 +57,17 @@
             SetConsoleMode(hOut, out_mode);
         }
 
+        CONSOLE_FONT_INFOEX cfi;
+        memset(&cfi, 0, sizeof(cfi));
+        cfi.cbSize = sizeof(cfi);
+        cfi.dwFontSize.Y = 16;
+        cfi.FontWeight = FW_NORMAL;
+        wcscpy(cfi.FaceName, L"Cascadia Code");
+        if (!SetCurrentConsoleFontEx(hOut, FALSE, &cfi)) {
+            wcscpy(cfi.FaceName, L"Consolas");
+            SetCurrentConsoleFontEx(hOut, FALSE, &cfi);
+        }
+
         WSADATA wsa;
         return WSAStartup(MAKEWORD(2, 2), &wsa) == 0 ? 0 : -1;
     }
@@ -92,7 +103,17 @@
         HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
         DWORD in_mode = 0;
         if (GetConsoleMode(hIn, &in_mode)) {
-            in_mode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
+#ifndef ENABLE_QUICK_EDIT_MODE
+#define ENABLE_QUICK_EDIT_MODE 0x0040
+#endif
+#ifndef ENABLE_EXTENDED_FLAGS
+#define ENABLE_EXTENDED_FLAGS 0x0080
+#endif
+#ifndef ENABLE_VIRTUAL_TERMINAL_INPUT
+#define ENABLE_VIRTUAL_TERMINAL_INPUT 0x0200
+#endif
+            in_mode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_QUICK_EDIT_MODE);
+            in_mode |= (ENABLE_VIRTUAL_TERMINAL_INPUT | ENABLE_EXTENDED_FLAGS);
             SetConsoleMode(hIn, in_mode);
         }
         HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -107,7 +128,7 @@
         HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
         DWORD in_mode = 0;
         if (GetConsoleMode(hIn, &in_mode)) {
-            in_mode |= (ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
+            in_mode |= (ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_QUICK_EDIT_MODE | ENABLE_EXTENDED_FLAGS);
             SetConsoleMode(hIn, in_mode);
         }
     }
@@ -123,7 +144,7 @@
     }
 
     static inline int platform_read_char(unsigned char *out) {
-        static unsigned char q[16];
+        static unsigned char q[32];
         static int qhead = 0;
         static int qtail = 0;
 
@@ -135,9 +156,9 @@
             return 1;
         }
 
-        int ch = _getch();
-        if (ch == 0 || ch == 224) {
-            int code = _getch();
+        wint_t wch = _getwch();
+        if (wch == 0 || wch == 224 || wch == 0xFFFF) {
+            wint_t code = _getwch();
             *out = 27; // ESC
             q[qtail++] = '[';
             switch (code) {
@@ -154,7 +175,35 @@
             }
             return 1;
         }
-        *out = (unsigned char)ch;
+
+        // Check for UTF-16 surrogate pairs (astral characters including emojis)
+        if (wch >= 0xD800 && wch <= 0xDBFF) {
+            wint_t wch2 = _getwch();
+            wchar_t wstr[3] = { (wchar_t)wch, (wchar_t)wch2, 0 };
+            char utf8[16] = {0};
+            int ulen = WideCharToMultiByte(CP_UTF8, 0, wstr, 2, utf8, sizeof(utf8), NULL, NULL);
+            if (ulen > 0) {
+                *out = (unsigned char)utf8[0];
+                for (int i = 1; i < ulen; ++i) {
+                    q[qtail++] = (unsigned char)utf8[i];
+                }
+                return 1;
+            }
+        } else if (wch > 127) {
+            // Non-ASCII wide character
+            wchar_t wstr[2] = { (wchar_t)wch, 0 };
+            char utf8[16] = {0};
+            int ulen = WideCharToMultiByte(CP_UTF8, 0, wstr, 1, utf8, sizeof(utf8), NULL, NULL);
+            if (ulen > 0) {
+                *out = (unsigned char)utf8[0];
+                for (int i = 1; i < ulen; ++i) {
+                    q[qtail++] = (unsigned char)utf8[i];
+                }
+                return 1;
+            }
+        }
+
+        *out = (unsigned char)wch;
         return 1;
     }
 
@@ -227,6 +276,46 @@
         ssize_t n = read(STDIN_FILENO, out, 1);
         return (n == 1) ? 1 : 0;
     }
+#endif
+
+// Sound Alert Types
+enum {
+    SOUND_NOTIF_BELL = 0,
+    SOUND_NOTIF_ACCEPT,
+    SOUND_NOTIF_DECLINE,
+    SOUND_NOTIF_MSG,
+    SOUND_SUCCESS = SOUND_NOTIF_ACCEPT,
+    SOUND_ALERT = SOUND_NOTIF_BELL,
+    SOUND_ERROR = SOUND_NOTIF_DECLINE,
+    SOUND_NOTIFICATION = SOUND_NOTIF_MSG
+};
+
+#ifdef _WIN32
+static inline void platform_play_sound(int sound_type) {
+    switch (sound_type) {
+        case SOUND_NOTIF_ACCEPT:
+            Beep(880, 80);
+            Beep(1760, 100);
+            break;
+        case SOUND_NOTIF_DECLINE:
+            Beep(440, 100);
+            Beep(330, 120);
+            break;
+        case SOUND_NOTIF_MSG:
+            Beep(1175, 70);
+            break;
+        case SOUND_NOTIF_BELL:
+        default:
+            MessageBeep(MB_ICONASTERISK);
+            break;
+    }
+}
+#else
+static inline void platform_play_sound(int sound_type) {
+    (void)sound_type;
+    ssize_t w = write(STDOUT_FILENO, "\a", 1);
+    (void)w;
+}
 #endif
 
 // Safe cross-platform basename (handles both '/' and '\' without modifying input)

@@ -187,10 +187,14 @@ int e2ee_decrypt_packet(const char *packet, char *out_from, char *out_plaintext,
     }
 
     ratchet_session_t *s = e2ee_find_session(from);
-    if (!s)
+    if (!s || (!s->has_peer_ratchet && s->send_count == 0) ||
+        (seq == 0 && memcmp(s->peer_identity_pub, remote_ik, X25519_KEY_LEN) != 0))
     {
-        s = e2ee_get_or_create_session(from, NULL);
-        if (!s) return -1;
+        if (!s)
+        {
+            s = e2ee_get_or_create_session(from, NULL);
+            if (!s) return -1;
+        }
 
         memcpy(s->peer_identity_pub, remote_ik, X25519_KEY_LEN);
         memcpy(s->peer_ratchet_pub, remote_ek, X25519_KEY_LEN);
