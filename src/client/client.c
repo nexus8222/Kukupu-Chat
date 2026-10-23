@@ -178,6 +178,13 @@ static void handle_received_line(char *line)
         if (sscanf(line, "__FILEREQ__:%d:%31[^:]:%255[^:]:%zu:%64s",
                    &fid, from, filename, &fsize, sha) == 5)
         {
+            ratchet_session_t *s = e2ee_find_session(from);
+            if (!s || !s->active)
+            {
+                char kreq[128];
+                snprintf(kreq, sizeof(kreq), "__KEYREQ__:%s\n", from);
+                send(sockfd, kreq, strlen(kreq), 0);
+            }
             file_transfer_handle_request(fid, from, filename, fsize, sha);
             char offer[512];
             snprintf(offer, sizeof(offer), "Offer: '%s' (%zu B) -> Type /fileaccept %d or /filedecline %d",
@@ -228,9 +235,16 @@ static void handle_received_line(char *line)
         int fid = 0;
         if (sscanf(line, "__FILEDONE__:%d", &fid) == 1)
         {
-            file_transfer_complete(fid);
+            int res = file_transfer_complete(fid);
             ui_clear_file_progress();
-            ui_add_message(MSG_FILE, "System", "File transfer completed and verified with SHA-256.", fid);
+            if (res == 0)
+            {
+                ui_add_message(MSG_FILE, "System", "File transfer completed and verified with SHA-256.", fid);
+            }
+            else
+            {
+                ui_add_message(MSG_ERROR, "File", "CHECKSUM MISMATCH! Received file is corrupted or incomplete.", fid);
+            }
         }
         return;
     }
@@ -326,6 +340,18 @@ static void handle_received_line(char *line)
     char sender[32] = {0};
     char body[1024] = {0};
 
+    if (sscanf(clean, "[EDITED] %31[^:]: %1023[^\n]", sender, body) == 2)
+    {
+        ui_edit_last_message(sender, body);
+        return;
+    }
+
+    if (sscanf(clean, "[DELETED] %31s deleted their last message", sender) == 1)
+    {
+        ui_delete_last_message(sender);
+        return;
+    }
+
     if (sscanf(clean, "[%31[^]]]: %1023[^\n]", sender, body) == 2)
     {
         if (strcmp(sender, username) == 0)
@@ -406,7 +432,8 @@ static void handle_received_line(char *line)
 static void *recv_msg_handler(void *arg)
 {
     (void)arg;
-    char buffer[LENGTH] = {};
+    char rx_buf[16384];
+    int rx_len = 0;
 
     while (!flag)
     {
@@ -422,16 +449,40 @@ static void *recv_msg_handler(void *arg)
 
         if (activity > 0 && FD_ISSET(sockfd, &read_fds))
         {
-            int receive = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+            int space = (int)sizeof(rx_buf) - 1 - rx_len;
+            if (space <= 0)
+            {
+                rx_len = 0;
+                space = (int)sizeof(rx_buf) - 1;
+            }
+
+            int receive = recv(sockfd, rx_buf + rx_len, space, 0);
             if (receive > 0)
             {
-                buffer[receive] = '\0';
-                char *saveptr = NULL;
-                char *line = strtok_r(buffer, "\n", &saveptr);
-                while (line != NULL)
+                rx_len += receive;
+                rx_buf[rx_len] = '\0';
+
+                char *newline_pos;
+                while ((newline_pos = memchr(rx_buf, '\n', rx_len)) != NULL)
                 {
+                    int line_len = (int)(newline_pos - rx_buf);
+                    char line[4096];
+                    if (line_len >= (int)sizeof(line))
+                        line_len = (int)sizeof(line) - 1;
+
+                    memcpy(line, rx_buf, line_len);
+                    line[line_len] = '\0';
+
+                    int consumed = (int)(newline_pos - rx_buf) + 1;
+                    int remain = rx_len - consumed;
+                    if (remain > 0)
+                    {
+                        memmove(rx_buf, rx_buf + consumed, remain);
+                    }
+                    rx_len = remain;
+                    rx_buf[rx_len] = '\0';
+
                     handle_received_line(line);
-                    line = strtok_r(NULL, "\n", &saveptr);
                 }
                 ui_render(input, cursor_pos, current_suggestion);
             }
@@ -448,8 +499,6 @@ static void *recv_msg_handler(void *arg)
             // Heartbeat redraw to expire typing indicators or progress bars
             ui_render(input, cursor_pos, current_suggestion);
         }
-
-        memset(buffer, 0, sizeof(buffer));
     }
 
     return NULL;
@@ -748,12 +797,76 @@ static void chat_loop(void)
                     continue;
                 }
 
+                if (strncmp(input, "/msg ", 5) == 0)
+                {
+                    char target[32] = {0};
+                    char plaintext[BUFFER_SIZE] = {0};
+                    if (sscanf(input + 5, "%31s %2047[^\n]", target, plaintext) == 2)
+                    {
+                        ratchet_session_t *s = e2ee_find_session(target);
+                        if (!s || !s->active)
+                        {
+                            char kreq[128];
+                            snprintf(kreq, sizeof(kreq), "__KEYREQ__:%s\n", target);
+                            send(sockfd, kreq, strlen(kreq), 0);
+                            for (int w = 0; w < 10; w++)
+                            {
+                                usleep(30000);
+                                s = e2ee_find_session(target);
+                                if (s && s->active) break;
+                            }
+                        }
+
+                        char e2ee_packet[4096];
+                        if (s && s->active && e2ee_encrypt_message(target, plaintext, e2ee_packet, sizeof(e2ee_packet)) == 0)
+                        {
+                            char send_buf[sizeof(e2ee_packet) + 32];
+                            snprintf(send_buf, sizeof(send_buf), "%s\n", e2ee_packet);
+                            send(sockfd, send_buf, strlen(send_buf), 0);
+                            ui_add_message(MSG_E2EE, target, plaintext, 0);
+                        }
+                        else
+                        {
+                            char send_buf[INPUT_BUFFER + 4];
+                            snprintf(send_buf, sizeof(send_buf), "%s\n", input);
+                            send(sockfd, send_buf, strlen(send_buf), 0);
+                            char self_pm[1024];
+                            snprintf(self_pm, sizeof(self_pm), "PM to %s: %s", target, plaintext);
+                            ui_add_message(MSG_PRIVATE, "Me", self_pm, 0);
+                        }
+                    }
+                    else
+                    {
+                        ui_add_message(MSG_SYSTEM, "Usage", "/msg <username> <message>", 0);
+                    }
+                    input_len = 0;
+                    cursor_pos = 0;
+                    input[0] = '\0';
+                    current_suggestion[0] = '\0';
+                    ui_scroll_bottom();
+                    ui_render(input, cursor_pos, current_suggestion);
+                    continue;
+                }
+
                 if (strncmp(input, "/sendfile ", 10) == 0)
                 {
                     char target[32] = {0};
                     char filepath[256] = {0};
                     if (sscanf(input + 10, "%31s %255s", target, filepath) == 2)
                     {
+                        ratchet_session_t *s = e2ee_find_session(target);
+                        if (!s || !s->active)
+                        {
+                            char kreq[128];
+                            snprintf(kreq, sizeof(kreq), "__KEYREQ__:%s\n", target);
+                            send(sockfd, kreq, strlen(kreq), 0);
+                            for (int w = 0; w < 10; w++)
+                            {
+                                usleep(30000);
+                                s = e2ee_find_session(target);
+                                if (s && s->active) break;
+                            }
+                        }
                         file_transfer_start_send(target, filepath, sockfd);
                         char msg[512];
                         snprintf(msg, sizeof(msg), "Sent transfer offer for '%s' to %s.", filepath, target);
@@ -893,8 +1006,8 @@ static void chat_loop(void)
                 continue;
             }
 
-            // Printable character input
-            if (ch >= 32 && ch <= 126)
+            // Printable character input (including multibyte UTF-8 sequences)
+            if ((unsigned char)ch >= 32 && (unsigned char)ch != 127)
             {
                 if (input_len < INPUT_BUFFER - 4)
                 {

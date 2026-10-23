@@ -65,6 +65,26 @@
         WSACleanup();
     }
 
+    static inline void platform_write_console(const void *buf, size_t len) {
+        if (!buf || len == 0) return;
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD mode = 0;
+        if (GetConsoleMode(hOut, &mode)) {
+            int wlen = MultiByteToWideChar(CP_UTF8, 0, (const char *)buf, (int)len, NULL, 0);
+            if (wlen > 0) {
+                wchar_t *wbuf = (wchar_t *)malloc((size_t)wlen * sizeof(wchar_t));
+                if (wbuf) {
+                    MultiByteToWideChar(CP_UTF8, 0, (const char *)buf, (int)len, wbuf, wlen);
+                    DWORD written = 0;
+                    WriteConsoleW(hOut, wbuf, (DWORD)wlen, &written, NULL);
+                    free(wbuf);
+                    return;
+                }
+            }
+        }
+        _write(1, buf, (unsigned int)len);
+    }
+
     static inline void platform_enable_raw_mode(void) {
         SetConsoleOutputCP(CP_UTF8);
         SetConsoleCP(CP_UTF8);
@@ -164,6 +184,12 @@
 
     static inline void net_cleanup(void) {
         // No-op on POSIX
+    }
+
+    static inline void platform_write_console(const void *buf, size_t len) {
+        if (!buf || len == 0) return;
+        ssize_t w = write(STDOUT_FILENO, buf, len);
+        (void)w;
     }
 
     static struct termios orig_termios_state;

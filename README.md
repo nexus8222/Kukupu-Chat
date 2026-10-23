@@ -52,17 +52,19 @@ Pre-compiled, statically linked binaries are included directly in the [`release/
 ## Key Features
 
 ### [1] Signal-Style Double Ratchet E2EE
-- **End-to-End Encryption**: Zero server-side plaintext visibility.
+- **Universal End-to-End Encryption**: Zero server-side plaintext visibility across all private messages (`/msg`) and direct sessions without requiring manual toggles.
 - **Diffie-Hellman Ratchet**: Curve25519 (`X25519`) dynamic key exchange on alternating rounds.
 - **Symmetric Chain Ratchet**: HKDF-SHA256 message and chain key derivations (`WhisperRatchetRoot`, `WhisperRatchetChain`, `WhisperMessageKeys`).
 - **Authenticated Encryption**: AES-256-GCM AEAD with 12-byte initialization vectors and 16-byte authentication tags.
 - **Forward Secrecy & Break-in Recovery**: Old keys cannot decrypt future messages; past keys cannot be derived from a compromised ephemeral state.
 - **Public Key Directory**: Automatic identity key broadcast and directory querying via `__IDKEY__` and `__KEYREQ__`.
 
-### [2] Chunked In-Band File Transfer
+### [2] Chunked In-Band File Transfer with AES-256-GCM E2EE
+- **End-to-End Encrypted Chunks**: File chunks are encrypted via AES-256-GCM using keys derived dynamically through X25519 Diffie-Hellman and HKDF-SHA256 (`KukupuFileTransferE2EE`).
 - **In-Band Slicing**: Files are split into 1024-byte chunks and streamed via Base64 wire packets.
+- **Resilient TCP Stream Accumulator**: Buffered packet accumulation prevents chunk dropping or corruption under rapid TCP packet coalescing and MTU fragmentation.
 - **Negotiation Protocol**: Senders issue transfer offers; receivers interactively accept (`/fileaccept <id>`) or decline (`/filedecline <id>`).
-- **Integrity Verification**: Automatic SHA-256 checksum comparison on the receiving client before saving into `downloads/`.
+- **Integrity Verification**: Automatic SHA-256 checksum comparison on the receiving client before saving into `downloads/`. Corrupted transfers are immediately purged.
 - **Live Terminal Progress Bar**: Dynamic ASCII progress bar (`[FILE XFER] report.pdf [=============>   ] 75%`) rendered directly in the TUI status pane.
 
 ### [3] Anti-Spam Rate Limiting & DoS Defense
@@ -95,9 +97,11 @@ Pre-compiled, statically linked binaries are included directly in the [`release/
 ### [8] Professional Full-Screen Terminal UI (TUI)
 - **Alternate Screen Buffer**: Uses `\033[?1049h` and `\033[?1049l` to preserve standard shell scrollback.
 - **Flicker-Free Double Buffering**: Pre-renders entire screen frame into an off-screen buffer before a single atomic flush.
+- **Real In-Place Message Mutations**: Server `/editlast` and `/deletelast` events directly modify or remove previous chat messages in the scrollback buffer without echoing duplicate lines.
+- **Windows Emoji and Wide-Character Support**: Utilizes native wide-character console rendering (`WriteConsoleW`) with UTF-8 surrogate pairing and font fallback (`Segoe UI Emoji`), eliminating `??` replacement glyphs.
 - **Split-Pane Architecture**: Top header bar, main chat viewport, collapsible members sidebar, dedicated status bar, and pinned input box.
 - **Dynamic Resize Support**: Automatically adapts to window geometry changes via `SIGWINCH` and `TIOCGWINSZ`.
-- **Zero Emojis Policy**: Clean, high-contrast ASCII and UTF-8 box characters (`┌`, `─`, `┐`, `│`, `└`, `┘`, `╭`, `╰`, `╮`, `╯`, `├`, `┤`, `*`, `>`).
+- **Zero Emojis Policy in UI Layout**: Clean, high-contrast ASCII and UTF-8 box characters (`┌`, `─`, `┐`, `│`, `└`, `┘`, `╭`, `╰`, `╮`, `╯`, `├`, `┤`, `*`, `>`).
 
 ---
 

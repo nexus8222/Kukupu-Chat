@@ -4,6 +4,32 @@ All notable changes to the **Kukupu Chat** project are documented in this file.
 
 ---
 
+## [1.2.0] - 2026-10-23
+
+### Added
+- **End-to-End Encrypted File Streaming (`src/client/file_transfer.c`)**:
+  - Encrypted file transfer payloads via AES-256-GCM AEAD using shared secrets derived via X25519 Elliptic-Curve Diffie-Hellman and HKDF-SHA256 (`KukupuFileTransferE2EE`).
+  - Chunks carry encrypted bytes with unique 12-byte initialization vectors and 16-byte authentication tags inside Base64 wire envelopes.
+- **Universal Transparent E2EE for Private Messages (`src/client/client.c`)**:
+  - Upgraded `/msg <target> <text>` to automatically discover identity keys via `__KEYREQ__` and encrypt using the Double Ratchet session without requiring manual `/e2ee` toggles.
+- **In-Place Message Editing and Deletion (`src/client/ui.c`, `include/ui.h`)**:
+  - Implemented `ui_edit_last_message()` and `ui_delete_last_message()` in the client TUI engine.
+  - Server broadcast notifications (`[EDITED]` and `[DELETED]`) are intercepted to directly mutate or remove the message in-place in the chat scrollback buffer rather than echoing duplicate lines.
+
+### Fixed
+- **Windows Console Emoji Rendering (`include/compat.h`, `src/client/ui.c`, `src/client/client.c`)**:
+  - Added `platform_write_console()` utilizing `MultiByteToWideChar(CP_UTF8, ...)` and `WriteConsoleW()` to trigger Windows console wide-character rendering and native emoji font fallback (`Segoe UI Emoji`), resolving emoji corruption (`??`) on Windows.
+  - Corrected `wrap_message()` in `ui.c` to never sever multi-byte UTF-8 continuation bytes across line boundaries.
+  - Updated `visual_str_len()` to accurately calculate terminal column widths for multi-byte Unicode characters.
+  - Enabled non-ASCII byte inputs in client terminal input loops to allow typing and pasting UTF-8 text.
+- **File Transfer TCP Coalescing and Integrity Verification (`src/server/server.c`, `src/client/client.c`, `src/client/file_transfer.c`)**:
+  - Implemented dynamic per-connection streaming line accumulators (`rx_buf`, `rx_len`) in both server and client to parse every newline-delimited command across fragmented or coalesced TCP packets, eliminating chunk drops during bulk transfers.
+  - Added explicit seek alignment (`fseek(fp, chunk_seq * FILE_CHUNK_SIZE, SEEK_SET)`) before chunk writes.
+  - Added transmission rate pacing (`usleep(5000)`) to maintain TCP stream stability.
+  - Fixed false-positive verification reporting: client now checks `file_transfer_complete()` return status on `__FILEDONE__` and removes corrupted files upon checksum failure.
+
+---
+
 ## [1.1.0] - 2026-10-21
 
 ### Added

@@ -74,19 +74,30 @@ static int visual_str_len(const char *s)
         }
         else
         {
-            if ((*p & 0xC0) == 0x80)
+            if ((*p & 0x80) == 0)
             {
-                // UTF-8 continuation byte, skip from width count
+                len += 1;
+                p++;
+            }
+            else if ((*p & 0xE0) == 0xC0)
+            {
+                len += 1;
+                p += (p[1] ? 2 : 1);
+            }
+            else if ((*p & 0xF0) == 0xE0)
+            {
+                len += 1;
+                p += (p[1] && p[2] ? 3 : (p[1] ? 2 : 1));
             }
             else if ((*p & 0xF8) == 0xF0)
             {
-                len += 2; // Emoji takes 2 columns
+                len += 2; // Emoji takes 2 terminal columns
+                p += (p[1] && p[2] && p[3] ? 4 : (p[1] && p[2] ? 3 : (p[1] ? 2 : 1)));
             }
             else
             {
-                len += 1;
+                p++;
             }
-            p++;
         }
     }
     return len;
@@ -147,8 +158,7 @@ void ui_init(const char *username)
     update_term_size();
 
     // Enter alternate screen buffer, disable line wrap, clear screen, hide cursor during setup
-    ssize_t w = write(STDOUT_FILENO, "\033[?1049h\033[?7l\033[2J\033[H\033[?25l", 23);
-    (void)w;
+    platform_write_console("\033[?1049h\033[?7l\033[2J\033[H\033[?25l", 23);
 
 #ifndef _WIN32
     struct sigaction sa;
@@ -182,8 +192,7 @@ void ui_shutdown(void)
 {
     pthread_mutex_lock(&ui_lock);
     // Restore line wrap, leave alternate screen buffer, restore cursor, clear attributes
-    ssize_t w = write(STDOUT_FILENO, "\033[0m\033[?7h\033[?1049l\033[?25h\n", 22);
-    (void)w;
+    platform_write_console("\033[0m\033[?7h\033[?1049l\033[?25h\n", 22);
     pthread_mutex_unlock(&ui_lock);
 }
 
@@ -288,7 +297,42 @@ void ui_delete_message(int msg_id)
         if (messages[i].msg_id == msg_id)
         {
             messages[i].vanished = 1;
-            strncpy(messages[i].text, "[Message vanished]", sizeof(messages[i].text) - 1);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&ui_lock);
+}
+
+void ui_edit_last_message(const char *sender, const char *new_text)
+{
+    if (!sender || !new_text) return;
+
+    pthread_mutex_lock(&ui_lock);
+    int start_m = (msg_count > MAX_UI_MESSAGES) ? (msg_count - MAX_UI_MESSAGES) : 0;
+    for (int i = msg_count - 1; i >= start_m; --i)
+    {
+        ui_message_t *m = &messages[i % MAX_UI_MESSAGES];
+        if (!m->vanished && (strcmp(m->sender, sender) == 0 || (strcmp(sender, my_username) == 0 && m->type == MSG_SELF)))
+        {
+            snprintf(m->text, sizeof(m->text), "%s (edited)", new_text);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&ui_lock);
+}
+
+void ui_delete_last_message(const char *sender)
+{
+    if (!sender || strlen(sender) == 0) return;
+
+    pthread_mutex_lock(&ui_lock);
+    int start_m = (msg_count > MAX_UI_MESSAGES) ? (msg_count - MAX_UI_MESSAGES) : 0;
+    for (int i = msg_count - 1; i >= start_m; --i)
+    {
+        ui_message_t *m = &messages[i % MAX_UI_MESSAGES];
+        if (!m->vanished && (strcmp(m->sender, sender) == 0 || (strcmp(sender, my_username) == 0 && m->type == MSG_SELF)))
+        {
+            m->vanished = 1;
             break;
         }
     }
@@ -557,6 +601,19 @@ static int wrap_message(const ui_message_t *msg, int max_width, render_line_t *o
             {
                 take = budget; // Hard break if word is longer than budget
             }
+            // Ensure we never split a multibyte UTF-8 character
+            while (take > 0 && ((unsigned char)p[take] & 0xC0) == 0x80)
+            {
+                take--;
+            }
+            if (take == 0)
+            {
+                take = 1;
+                while (p[take] && ((unsigned char)p[take] & 0xC0) == 0x80)
+                {
+                    take++;
+                }
+            }
         }
 
         char chunk[256];
@@ -568,13 +625,13 @@ static int wrap_message(const ui_message_t *msg, int max_width, render_line_t *o
         {
             snprintf(out_lines[line_idx].plain, sizeof(out_lines[line_idx].plain), "%s%s", prefix_plain, chunk);
             snprintf(out_lines[line_idx].color, sizeof(out_lines[line_idx].color), "%s\033[37m%s\033[0m", prefix_color, chunk);
-            out_lines[line_idx].plain_len = prefix_len + take;
+            out_lines[line_idx].plain_len = visual_str_len(out_lines[line_idx].plain);
         }
         else
         {
             snprintf(out_lines[line_idx].plain, sizeof(out_lines[line_idx].plain), "%s%s", indent_spaces, chunk);
             snprintf(out_lines[line_idx].color, sizeof(out_lines[line_idx].color), "%s\033[37m%s\033[0m", indent_spaces, chunk);
-            out_lines[line_idx].plain_len = indent_len + take;
+            out_lines[line_idx].plain_len = visual_str_len(out_lines[line_idx].plain);
         }
 
         line_idx++;
@@ -610,6 +667,7 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
     for (int m = start_m; m < msg_count && total_lines < MAX_RENDER_LINES - 20; ++m)
     {
         const ui_message_t *msg = &messages[m % MAX_UI_MESSAGES];
+        if (msg->vanished) continue;
         render_line_t wrapped[16];
         int n = wrap_message(msg, chat_width - 1, wrapped, 16);
         for (int i = 0; i < n && total_lines < MAX_RENDER_LINES; ++i)
@@ -844,8 +902,7 @@ void ui_render(const char *input_buf, int cursor_pos, const char *suggestion)
     fidx += snprintf(frame + fidx, FRAME_BUF_SIZE - fidx, "\033[%d;%dH\033[?25h", rows - 1, target_col);
 
     // Atomically write entire frame
-    ssize_t w = write(STDOUT_FILENO, frame, fidx);
-    (void)w;
+    platform_write_console(frame, fidx);
 
     pthread_mutex_unlock(&ui_lock);
 }

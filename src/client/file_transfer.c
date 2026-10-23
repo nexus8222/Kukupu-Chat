@@ -1,9 +1,11 @@
 #include "file_transfer.h"
 #include "compat.h"
+#include "e2ee.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <openssl/rand.h>
 
 static file_transfer_t transfers[MAX_ACTIVE_TRANSFERS];
 static int next_transfer_id = 1000;
@@ -134,6 +136,22 @@ int file_transfer_start_send(const char *peer_username, const char *filepath, in
     // Compute SHA-256
     compute_sha256_file(filepath, t->expected_sha256);
 
+    // Setup E2EE key if peer session exists
+    t->is_encrypted = 0;
+    ratchet_session_t *s = e2ee_find_session(peer_username);
+    if (s && s->active && g_e2ee.identity_key)
+    {
+        unsigned char dh_secret[32];
+        if (x25519_derive_shared_secret(g_e2ee.identity_key, s->peer_identity_pub, dh_secret) == 0)
+        {
+            if (hkdf_sha256((const unsigned char *)t->expected_sha256, strlen(t->expected_sha256),
+                            dh_secret, 32, "KukupuFileTransferE2EE", t->e2ee_key, 32) == 0)
+            {
+                t->is_encrypted = 1;
+            }
+        }
+    }
+
     // Send request to server: __FILEREQ__:<id>:<to>:<filename>:<filesize>:<sha256>
     char req[512];
     snprintf(req, sizeof(req), "__FILEREQ__:%d:%s:%s:%zu:%s\n",
@@ -187,6 +205,22 @@ int file_transfer_handle_request(int id, const char *from, const char *filename,
     t->state = TRANSFER_PENDING;
     t->last_activity = time(NULL);
 
+    // Setup E2EE key if peer session exists
+    t->is_encrypted = 0;
+    ratchet_session_t *s = e2ee_find_session(from);
+    if (s && s->active && g_e2ee.identity_key)
+    {
+        unsigned char dh_secret[32];
+        if (x25519_derive_shared_secret(g_e2ee.identity_key, s->peer_identity_pub, dh_secret) == 0)
+        {
+            if (hkdf_sha256((const unsigned char *)t->expected_sha256, strlen(t->expected_sha256),
+                            dh_secret, 32, "KukupuFileTransferE2EE", t->e2ee_key, 32) == 0)
+            {
+                t->is_encrypted = 1;
+            }
+        }
+    }
+
     printf("\n\033[1;35m========================================================\033[0m\n");
     printf("\033[1;35m[INCOMING FILE TRANSFER]\033[0m\n");
     printf(" From:     \033[1;32m%s\033[0m\n", from);
@@ -216,6 +250,23 @@ int file_transfer_accept(int id, int sockfd)
     }
 
     t->state = TRANSFER_ACTIVE;
+
+    if (!t->is_encrypted)
+    {
+        ratchet_session_t *s = e2ee_find_session(t->peer);
+        if (s && s->active && g_e2ee.identity_key)
+        {
+            unsigned char dh_secret[32];
+            if (x25519_derive_shared_secret(g_e2ee.identity_key, s->peer_identity_pub, dh_secret) == 0)
+            {
+                if (hkdf_sha256((const unsigned char *)t->expected_sha256, strlen(t->expected_sha256),
+                                dh_secret, 32, "KukupuFileTransferE2EE", t->e2ee_key, 32) == 0)
+                {
+                    t->is_encrypted = 1;
+                }
+            }
+        }
+    }
     char accept_msg[128];
     snprintf(accept_msg, sizeof(accept_msg), "__FILEACCEPT__:%d:%s\n", id, t->peer);
     send(sockfd, accept_msg, strlen(accept_msg), 0);
@@ -249,6 +300,23 @@ int file_transfer_handle_accept(int id, int sockfd)
     if (!t || !t->is_sender) return -1;
 
     t->state = TRANSFER_ACTIVE;
+
+    if (!t->is_encrypted)
+    {
+        ratchet_session_t *s = e2ee_find_session(t->peer);
+        if (s && s->active && g_e2ee.identity_key)
+        {
+            unsigned char dh_secret[32];
+            if (x25519_derive_shared_secret(g_e2ee.identity_key, s->peer_identity_pub, dh_secret) == 0)
+            {
+                if (hkdf_sha256((const unsigned char *)t->expected_sha256, strlen(t->expected_sha256),
+                                dh_secret, 32, "KukupuFileTransferE2EE", t->e2ee_key, 32) == 0)
+                {
+                    t->is_encrypted = 1;
+                }
+            }
+        }
+    }
     printf("\033[1;32m[FILE] %s accepted file '%s'. Beginning transmission...\033[0m\n", t->peer, t->filename);
     return 0;
 }
@@ -264,10 +332,33 @@ void file_transfer_sender_tick(int sockfd)
             size_t bytes = fread(chunk, 1, sizeof(chunk), t->fp);
             if (bytes > 0)
             {
-                char b64[FILE_CHUNK_SIZE * 2];
-                base64_encode(chunk, bytes, b64, sizeof(b64));
+                char b64[FILE_CHUNK_SIZE * 3 + 256];
+                if (t->is_encrypted)
+                {
+                    unsigned char iv[AES_IV_LEN];
+                    RAND_bytes(iv, sizeof(iv));
+                    unsigned char ct[FILE_CHUNK_SIZE + 64];
+                    unsigned char tag[AES_TAG_LEN];
+                    int ct_len = aes_gcm_encrypt(t->e2ee_key, iv, NULL, 0, chunk, bytes, ct, tag);
+                    if (ct_len > 0)
+                    {
+                        unsigned char payload[FILE_CHUNK_SIZE + 128];
+                        memcpy(payload, iv, AES_IV_LEN);
+                        memcpy(payload + AES_IV_LEN, tag, AES_TAG_LEN);
+                        memcpy(payload + AES_IV_LEN + AES_TAG_LEN, ct, (size_t)ct_len);
+                        base64_encode(payload, AES_IV_LEN + AES_TAG_LEN + (size_t)ct_len, b64, sizeof(b64));
+                    }
+                    else
+                    {
+                        base64_encode(chunk, bytes, b64, sizeof(b64));
+                    }
+                }
+                else
+                {
+                    base64_encode(chunk, bytes, b64, sizeof(b64));
+                }
 
-                char packet[FILE_CHUNK_SIZE * 2 + 128];
+                char packet[sizeof(b64) + 128];
                 snprintf(packet, sizeof(packet), "__FILECHUNK__:%d:%s:%d:%d:%s\n",
                          t->id, t->peer, t->current_chunk, t->total_chunks, b64);
                 send(sockfd, packet, strlen(packet), 0);
@@ -275,7 +366,7 @@ void file_transfer_sender_tick(int sockfd)
                 t->current_chunk++;
                 t->bytes_transferred += bytes;
                 print_progress(t->filename, t->current_chunk, t->total_chunks);
-                usleep(1000); // 1ms pacing
+                usleep(5000); // 5ms pacing
             }
             else
             {
@@ -298,7 +389,7 @@ int file_transfer_receive_chunk(int id, int chunk_seq, int total_chunks, const c
     file_transfer_t *t = find_transfer(id, 0);
     if (!t || t->is_sender || t->state != TRANSFER_ACTIVE || !t->fp) return -1;
 
-    unsigned char raw[FILE_CHUNK_SIZE * 2];
+    unsigned char raw[FILE_CHUNK_SIZE * 3 + 128];
     size_t raw_len = 0;
     if (base64_decode(b64_data, raw, &raw_len) != 0 || raw_len == 0) return -1;
 
@@ -306,8 +397,37 @@ int file_transfer_receive_chunk(int id, int chunk_seq, int total_chunks, const c
     if (t->bytes_transferred + raw_len > t->filesize + FILE_CHUNK_SIZE)
         return -1;
 
-    fwrite(raw, 1, raw_len, t->fp);
-    t->bytes_transferred += raw_len;
+    if (t->is_encrypted && raw_len > (AES_IV_LEN + AES_TAG_LEN))
+    {
+        unsigned char iv[AES_IV_LEN];
+        unsigned char tag[AES_TAG_LEN];
+        memcpy(iv, raw, AES_IV_LEN);
+        memcpy(tag, raw + AES_IV_LEN, AES_TAG_LEN);
+        const unsigned char *ct = raw + AES_IV_LEN + AES_TAG_LEN;
+        size_t ct_len = raw_len - (AES_IV_LEN + AES_TAG_LEN);
+
+        unsigned char pt[FILE_CHUNK_SIZE + 64];
+        int pt_len = aes_gcm_decrypt(t->e2ee_key, iv, NULL, 0, ct, ct_len, tag, pt);
+        if (pt_len > 0)
+        {
+            fseek(t->fp, (long)chunk_seq * FILE_CHUNK_SIZE, SEEK_SET);
+            fwrite(pt, 1, (size_t)pt_len, t->fp);
+            t->bytes_transferred += (size_t)pt_len;
+        }
+        else
+        {
+            fseek(t->fp, (long)chunk_seq * FILE_CHUNK_SIZE, SEEK_SET);
+            fwrite(raw, 1, raw_len, t->fp);
+            t->bytes_transferred += raw_len;
+        }
+    }
+    else
+    {
+        fseek(t->fp, (long)chunk_seq * FILE_CHUNK_SIZE, SEEK_SET);
+        fwrite(raw, 1, raw_len, t->fp);
+        t->bytes_transferred += raw_len;
+    }
+
     t->current_chunk = chunk_seq + 1;
     t->total_chunks = total_chunks;
 
@@ -320,6 +440,7 @@ int file_transfer_complete(int id)
     file_transfer_t *t = find_transfer(id, 0);
     if (!t || t->is_sender || !t->fp) return -1;
 
+    fflush(t->fp);
     fclose(t->fp);
     t->fp = NULL;
 
@@ -339,6 +460,7 @@ int file_transfer_complete(int id)
         t->state = TRANSFER_FAILED;
         printf("\n\033[1;31m[FILE] CHECKSUM MISMATCH on '%s'!\033[0m\n", t->filepath);
         printf(" Expected: %s\n Actual:   %s\n", t->expected_sha256, actual_sha256);
+        remove(t->filepath);
         return -1;
     }
 }

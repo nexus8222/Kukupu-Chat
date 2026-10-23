@@ -385,10 +385,11 @@ int handle_command(const char *cmdline, client_t *cli)
             snprintf(edited, sizeof(edited), "\033[1;33m[EDITED] %s: %s\033[0m\n", cli->username, newmsg);
             broadcast_message(edited, cli);
 
-            strncpy(cli->last_msg, newmsg, BUFFER_SIZE);
+            strncpy(cli->last_msg, newmsg, BUFFER_SIZE - 1);
+            cli->last_msg[BUFFER_SIZE - 1] = '\0';
             cli->last_msg_time = time(NULL);
 
-            log_connection("[EDIT] %s edited their last message.", cli->username);
+            log_event("[EDIT] %s edited their last message.", cli->username);
         }
         return 1;
     }
@@ -408,7 +409,7 @@ int handle_command(const char *cmdline, client_t *cli)
             cli->last_msg[0] = '\0';
             cli->last_msg_time = 0;
 
-            log_connection("[DELETE] %s deleted their last message.", cli->username);
+            log_event("[DELETE] %s deleted their last message.", cli->username);
         }
         return 1;
     }

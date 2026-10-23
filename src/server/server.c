@@ -374,7 +374,6 @@ static void handle_internal_protocol(const char *buffer, client_t *cli)
 
 void *handle_client(void *arg)
 {
-    char buffer[4096];
     char name[32];
     client_t *cli = (client_t *)arg;
 
@@ -758,59 +757,92 @@ void *handle_client(void *arg)
     client_ratelimit_t rl;
     ratelimit_client_init(&rl);
 
+    char rx_buf[16384];
+    int rx_len = 0;
+
     while (1)
     {
-        int rlen = recv(cli->sockfd, buffer, sizeof(buffer) - 1, 0);
+        int space = (int)sizeof(rx_buf) - 1 - rx_len;
+        if (space <= 0)
+        {
+            rx_len = 0;
+            space = (int)sizeof(rx_buf) - 1;
+        }
+
+        int rlen = recv(cli->sockfd, rx_buf + rx_len, space, 0);
         if (rlen <= 0)
             break;
 
-        buffer[rlen] = '\0';
-        trim_newline(buffer);
-        if (strlen(buffer) == 0)
-            continue;
+        rx_len += rlen;
+        rx_buf[rx_len] = '\0';
 
-        if (strncmp(buffer, "__", 2) == 0)
+        char *newline_pos;
+        while ((newline_pos = memchr(rx_buf, '\n', rx_len)) != NULL)
         {
-            handle_internal_protocol(buffer, cli);
-            continue;
-        }
+            int line_len = (int)(newline_pos - rx_buf);
+            char line[4096];
+            if (line_len >= (int)sizeof(line))
+                line_len = (int)sizeof(line) - 1;
 
-        // Message rate limiting check
-        if (!ratelimit_check_message(cli, &rl))
-        {
-            continue;
-        }
+            memcpy(line, rx_buf, line_len);
+            line[line_len] = '\0';
 
-        if (cli->is_muted)
-        {
-            send_to_client(cli, "\033[1;31m[SERVER] You are muted.\033[0m\n");
-            continue;
-        }
-
-        if (buffer[0] == '/')
-        {
-            if (handle_command(buffer, cli))
-                continue; // command handled
-        }
-        else
-        {
-            for (size_t i = 0; buffer[i]; i++)
+            int consumed = (int)(newline_pos - rx_buf) + 1;
+            int remain = rx_len - consumed;
+            if (remain > 0)
             {
-                if (buffer[i] == '\r' || buffer[i] == '\n')
-                {
-                    buffer[i] = ' ';
-                }
+                memmove(rx_buf, rx_buf + consumed, remain);
             }
-            char msg[sizeof(buffer) + 512];
-            snprintf(msg, sizeof(msg), "%s[%s]:%s %s\n",
-                     cli->color,
-                     cli->username,
-                     COLOR_RESET,
-                     buffer);
-            broadcast_message(msg, cli);
-            strncpy(cli->last_msg, buffer, BUFFER_SIZE - 1);
-            cli->last_msg[BUFFER_SIZE - 1] = '\0';
-            cli->last_msg_time = time(NULL);
+            rx_len = remain;
+            rx_buf[rx_len] = '\0';
+
+            trim_newline(line);
+            if (strlen(line) == 0)
+                continue;
+
+            if (strncmp(line, "__", 2) == 0)
+            {
+                handle_internal_protocol(line, cli);
+                continue;
+            }
+
+            // Message rate limiting check
+            if (!ratelimit_check_message(cli, &rl))
+            {
+                continue;
+            }
+
+            if (cli->is_muted)
+            {
+                send_to_client(cli, "\033[1;31m[SERVER] You are muted.\033[0m\n");
+                continue;
+            }
+
+            if (line[0] == '/')
+            {
+                if (handle_command(line, cli))
+                    continue; // command handled
+            }
+            else
+            {
+                for (size_t i = 0; line[i]; i++)
+                {
+                    if (line[i] == '\r' || line[i] == '\n')
+                    {
+                        line[i] = ' ';
+                    }
+                }
+                char msg[sizeof(line) + 512];
+                snprintf(msg, sizeof(msg), "%s[%s]:%s %s\n",
+                         cli->color,
+                         cli->username,
+                         COLOR_RESET,
+                         line);
+                broadcast_message(msg, cli);
+                strncpy(cli->last_msg, line, BUFFER_SIZE - 1);
+                cli->last_msg[BUFFER_SIZE - 1] = '\0';
+                cli->last_msg_time = time(NULL);
+            }
         }
     }
 

@@ -31,6 +31,8 @@ typedef struct {
     int total_chunks;
     transfer_state_t state;
     time_t last_activity;
+    int is_encrypted;
+    unsigned char e2ee_key[32];
 } file_transfer_t;
 
 void file_transfer_init();

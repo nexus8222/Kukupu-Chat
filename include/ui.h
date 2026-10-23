@@ -27,6 +27,8 @@ void ui_set_user_color(const char *color_code);
 void ui_set_registered(int is_registered);
 void ui_edit_message(int msg_id, const char *new_text);
 void ui_delete_message(int msg_id);
+void ui_edit_last_message(const char *sender, const char *new_text);
+void ui_delete_last_message(const char *sender);
 void ui_clear_messages(void);
 
 // Channel & user state
